@@ -3,7 +3,29 @@
     "allow": [
       "Bash(npx:*)",
       "Bash(cp:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "Bash(cd:*)",
+      "Bash(npm run:*)",
+      "Bash(node:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import reportlab; print\\(''ok''\\)\")",
+      "Bash(pip3 install:*)",
+      "Bash(python3 -c \"import reportlab; print\\(''ok''\\)\")",
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Bash(python3:*)",
+      "Bash(find scrapers:*)",
+      "WebFetch(domain:www.wikifx.com)",
+      "WebFetch(domain:www.myfxbook.com)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)"
     ]
   }
 }

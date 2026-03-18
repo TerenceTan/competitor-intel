@@ -39,3 +39,21 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# docs
+/docs
+
+# data (SQLite DB — never commit)
+/data/
+
+# logs
+/logs/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# generated/sensitive files
+*.pdf
