@@ -99,6 +99,13 @@ export const aiInsights = sqliteTable("ai_insights", {
   actionsJson: text("actions_json"),
 });
 
+export const aiPortfolioInsights = sqliteTable("ai_portfolio_insights", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  generatedAt: text("generated_at").notNull(),
+  summary: text("summary"),
+  actionsJson: text("actions_json"),
+});
+
 export const scraperRuns = sqliteTable("scraper_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   scraperName: text("scraper_name").notNull(),

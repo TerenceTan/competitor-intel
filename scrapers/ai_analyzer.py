@@ -34,6 +34,52 @@ SCRAPER_NAME = "ai_analyzer"
 # Anthropic tool definition for structured output
 # ---------------------------------------------------------------------------
 
+PORTFOLIO_TOOL = {
+    "name": "record_portfolio_actions",
+    "description": (
+        "Record a single consolidated set of recommended actions for Pepperstone "
+        "after reviewing all competitor intelligence from today. "
+        "De-duplicate and prioritise across all competitors into the most important actions. "
+        "This tool must be called once."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": (
+                    "One paragraph summarising the overall competitive landscape today — "
+                    "which competitors are most active, what the dominant themes are, "
+                    "and Pepperstone's overall position."
+                ),
+            },
+            "recommended_actions": {
+                "type": "array",
+                "description": (
+                    "Prioritised list of concrete actions Pepperstone should take, "
+                    "synthesised across all competitors. Remove duplicates. Aim for 5–10 actions total."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "urgency": {
+                            "type": "string",
+                            "enum": ["immediate", "this_week", "this_month"],
+                        },
+                        "rationale": {
+                            "type": "string",
+                            "description": "One sentence explaining why this action is needed, naming the specific competitor(s) that triggered it.",
+                        },
+                    },
+                    "required": ["action", "urgency", "rationale"],
+                },
+            },
+        },
+        "required": ["summary", "recommended_actions"],
+    },
+}
+
 INSIGHT_TOOL = {
     "name": "record_competitive_insight",
     "description": (
@@ -153,6 +199,54 @@ def get_recent_news(conn, competitor_id: str, limit: int = 5) -> list[dict]:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
+def build_portfolio_prompt(all_insights: list[dict]) -> str:
+    """
+    Build a prompt that feeds all per-competitor insights into Claude
+    to produce one consolidated recommended action list.
+    """
+    sections = []
+    for item in all_insights:
+        name = item["name"]
+        summary = item["summary"]
+        findings_text = "\n".join(
+            f"    [{f['severity'].upper()}] {f['finding']}"
+            for f in item.get("key_findings", [])
+        )
+        actions_text = "\n".join(
+            f"    [{a['urgency']}] {a['action']}"
+            for a in item.get("actions", [])
+        )
+        sections.append(
+            f"Competitor: {name}\n"
+            f"  Summary: {summary}\n"
+            f"  Key findings:\n{findings_text or '    (none)'}\n"
+            f"  Per-competitor actions:\n{actions_text or '    (none)'}"
+        )
+
+    competitors_block = "\n\n".join(sections)
+
+    return f"""You are a senior competitive intelligence analyst at Pepperstone, a leading global CFD and forex broker headquartered in Melbourne, Australia, with a strong focus on the APAC region.
+
+Below are today's competitive intelligence reports for each competitor where changes were detected:
+
+{competitors_block}
+
+Context about Pepperstone:
+- Primary markets: Australia, UK, Europe, APAC
+- Key differentiators: tight spreads on major FX pairs, fast execution, strong regulation (ASIC, FCA, CySEC, DFSA, SCB, BaFID)
+- Target clients: active retail traders, professional traders, algo traders
+- Strong in MetaTrader 4/5 and cTrader platforms
+
+Your task:
+Synthesise ALL of the above into ONE consolidated, prioritised action plan for Pepperstone.
+- Remove duplicate or near-duplicate actions — keep only the most impactful version.
+- Elevate urgency where multiple competitors are moving in the same direction.
+- Each action must name the competitor(s) that triggered it in the rationale.
+- Aim for 5–10 actions total, ordered by urgency (immediate first).
+
+Use the record_portfolio_actions tool to return your analysis."""
+
+
 def build_prompt(competitor: dict, changes: list[dict], recent_news: list[dict]) -> str:
     tier_labels = {1: "Tier 1 (major global broker)", 2: "Tier 2 (regional broker)", 3: "Tier 3 (smaller/niche broker)"}
     tier_desc = tier_labels.get(competitor.get("tier", 1), "Unknown tier")
@@ -238,6 +332,9 @@ def run():
 
     generated_at = datetime.now(timezone.utc).isoformat()
 
+    # Collect per-competitor insights for portfolio synthesis
+    all_insights_for_portfolio: list[dict] = []
+
     for competitor_id, changes in todays_changes.items():
         print(f"Processing {competitor_id} ({len(changes)} change events)...")
 
@@ -295,6 +392,14 @@ def run():
             conn.commit()
             total_records += 1
 
+            # Collect for portfolio synthesis
+            all_insights_for_portfolio.append({
+                "name": competitor.get("name", competitor_id),
+                "summary": summary,
+                "key_findings": key_findings,
+                "actions": actions,
+            })
+
             # Print summary to stdout
             print(f"    Summary: {summary[:150]}...")
             for finding in key_findings:
@@ -304,6 +409,50 @@ def run():
 
         except Exception as e:
             msg = f"{competitor_id}: {e}"
+            print(f"    ERROR: {msg}")
+            error_summary.append(msg)
+
+    # -----------------------------------------------------------------------
+    # Portfolio synthesis — one consolidated action plan across all competitors
+    # -----------------------------------------------------------------------
+    if all_insights_for_portfolio:
+        print(f"\nGenerating consolidated portfolio actions from {len(all_insights_for_portfolio)} competitor(s)...")
+        try:
+            portfolio_prompt = build_portfolio_prompt(all_insights_for_portfolio)
+            portfolio_response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                tools=[PORTFOLIO_TOOL],
+                tool_choice={"type": "tool", "name": "record_portfolio_actions"},
+                messages=[{"role": "user", "content": portfolio_prompt}],
+            )
+
+            portfolio_data = None
+            for block in portfolio_response.content:
+                if block.type == "tool_use" and block.name == "record_portfolio_actions":
+                    portfolio_data = block.input
+                    break
+
+            if not portfolio_data:
+                raise ValueError("Model did not return a portfolio tool_use block.")
+
+            portfolio_summary = portfolio_data.get("summary", "")
+            portfolio_actions = portfolio_data.get("recommended_actions", [])
+
+            conn.execute(
+                """
+                INSERT INTO ai_portfolio_insights (generated_at, summary, actions_json)
+                VALUES (?, ?, ?)
+                """,
+                (generated_at, portfolio_summary, json.dumps(portfolio_actions)),
+            )
+            conn.commit()
+
+            print(f"    Portfolio summary: {portfolio_summary[:150]}...")
+            print(f"    Consolidated actions: {len(portfolio_actions)}")
+
+        except Exception as e:
+            msg = f"portfolio_synthesis: {e}"
             print(f"    ERROR: {msg}")
             error_summary.append(msg)
 

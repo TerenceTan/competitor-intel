@@ -111,6 +111,12 @@ export function runMigrations() {
   } catch {
     // Column already exists — ignore
   }
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS ai_portfolio_insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generated_at TEXT NOT NULL,
+    summary TEXT,
+    actions_json TEXT
+  )`);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS wikifx_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     competitor_id TEXT NOT NULL REFERENCES competitors(id),

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import {
   aiInsights,
+  aiPortfolioInsights,
   changeEvents,
   competitors,
   scraperRuns,
@@ -9,7 +10,7 @@ import { desc, eq } from "drizzle-orm";
 import { Card } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import Link from "next/link";
-import { Clock, TrendingUp } from "lucide-react";
+import { Clock, TrendingUp, Zap } from "lucide-react";
 import { TimeAgo } from "@/components/ui/time-ago";
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -33,6 +34,13 @@ export default async function ExecutiveSummaryPage() {
   // Fetch all competitors for lookup
   const allCompetitors = await db.select().from(competitors);
   const competitorMap = Object.fromEntries(allCompetitors.map((c) => [c.id, c]));
+
+  // Latest portfolio-level recommended actions
+  const [latestPortfolio] = await db
+    .select()
+    .from(aiPortfolioInsights)
+    .orderBy(desc(aiPortfolioInsights.generatedAt))
+    .limit(1);
 
   // Top 3 latest AI insights
   const topInsights = await db
@@ -78,6 +86,70 @@ export default async function ExecutiveSummaryPage() {
           Daily morning brief — competitor intelligence overview for APAC markets
         </p>
       </div>
+
+      {/* Recommended Actions */}
+      <section>
+        <div className="flex items-center gap-2 mb-4">
+          <Zap className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <h2 className="text-lg font-semibold text-gray-900">Recommended Actions</h2>
+          {latestPortfolio && (
+            <span className="text-gray-500 text-sm">
+              — <TimeAgo dateStr={latestPortfolio.generatedAt} />
+            </span>
+          )}
+        </div>
+
+        {!latestPortfolio ? (
+          <div className="rounded-xl border border-gray-200 p-8 text-center text-gray-500 bg-white">
+            No recommendations yet — run AI analysis to generate consolidated actions.
+          </div>
+        ) : (() => {
+          type PortfolioAction = { action: string; urgency: string; rationale?: string };
+          let actions: PortfolioAction[] = [];
+          try { actions = latestPortfolio.actionsJson ? JSON.parse(latestPortfolio.actionsJson) : []; } catch {}
+
+          const urgencyConfig: Record<string, { label: string; border: string; badge: string }> = {
+            immediate: { label: "Immediate", border: "border-l-red-400",   badge: "bg-red-50 text-red-700 border-red-200" },
+            this_week: { label: "This Week",  border: "border-l-amber-400", badge: "bg-amber-50 text-amber-700 border-amber-200" },
+            this_month: { label: "This Month", border: "border-l-blue-400",  badge: "bg-blue-50 text-blue-700 border-blue-200" },
+          };
+
+          return (
+            <div className="space-y-3">
+              {latestPortfolio.summary && (
+                <p className="text-gray-600 text-sm leading-relaxed mb-4">{latestPortfolio.summary}</p>
+              )}
+              {(["immediate", "this_week", "this_month"] as const).map((urgency) => {
+                const group = actions.filter((a) => a.urgency === urgency);
+                if (!group.length) return null;
+                const cfg = urgencyConfig[urgency];
+                return (
+                  <div key={urgency}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.badge}`}>
+                        {cfg.label}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {group.map((a, i) => (
+                        <div
+                          key={i}
+                          className={`flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-100 border-l-4 bg-white ${cfg.border}`}
+                        >
+                          <p className="text-sm font-medium text-gray-800">{a.action}</p>
+                          {a.rationale && (
+                            <p className="text-xs text-gray-500">{a.rationale}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </section>
 
       {/* Top Things to Know Today */}
       <section>

@@ -230,6 +230,6 @@ COMPETITORS = [
 ]
 
 
-# DB_PATH = "/home/ubuntu/app/data/competitor-intel.db" 
-DB_PATH = "./data/competitor-intel.db" #for local
+DB_PATH = "/home/ubuntu/app/data/competitor-intel.db" 
+#DB_PATH = "./data/competitor-intel.db" #for local
 DELAY_BETWEEN_REQUESTS = 2.5  # seconds
