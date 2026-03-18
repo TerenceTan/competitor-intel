@@ -247,26 +247,68 @@ def scrape_app_store_direct(ios_app_id: str) -> float | None:
 
 def scrape_myfxbook_rating(myfxbook_slug: str) -> float | None:
     """
-    Fetch MyFXBook broker page using curl-cffi (Chrome TLS impersonation).
+    Fetch MyFXBook broker page.
+    Priority: SCRAPERAPI_KEY (trial/legacy) → WEBSHARE_PROXY_URL (free residential proxy) → curl-cffi (local dev).
     Returns float rating or None.
     """
-    if not _CURL_AVAILABLE:
-        return None
+    target_url = f"https://www.myfxbook.com/forex-brokers/{myfxbook_slug}"
 
-    url = f"https://www.myfxbook.com/forex-brokers/{myfxbook_slug}"
-    headers = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.myfxbook.com/",
-    }
+    scraper_api_key = os.environ.get("SCRAPERAPI_KEY")
+    webshare_proxy  = os.environ.get("WEBSHARE_PROXY_URL")
 
-    try:
-        resp = curl_requests.get(url, headers=headers, impersonate="chrome120", timeout=30)
-        if resp.status_code != 200:
-            print(f"    [MyFXBook] HTTP {resp.status_code} for {myfxbook_slug}")
+    if scraper_api_key:
+        # Server path: route through ScraperAPI residential proxy (trial / legacy)
+        url = (
+            f"http://api.scraperapi.com"
+            f"?api_key={scraper_api_key}"
+            f"&url={target_url}"
+            f"&render=false"
+        )
+        try:
+            resp = requests.get(url, timeout=60)
+            if resp.status_code != 200:
+                print(f"    [MyFXBook] ScraperAPI HTTP {resp.status_code} for {myfxbook_slug}")
+                return None
+            html = resp.text
+        except Exception as e:
+            print(f"    [MyFXBook] ScraperAPI error for {myfxbook_slug}: {e}")
             return None
 
-        html = resp.text
+    elif webshare_proxy:
+        # Server path: Webshare static residential proxy (free tier, 1 GB/mo)
+        proxies = {"http": webshare_proxy, "https": webshare_proxy}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        try:
+            resp = requests.get(target_url, proxies=proxies, headers=headers, timeout=30)
+            if resp.status_code != 200:
+                print(f"    [MyFXBook] Webshare HTTP {resp.status_code} for {myfxbook_slug}")
+                return None
+            html = resp.text
+        except Exception as e:
+            print(f"    [MyFXBook] Webshare error for {myfxbook_slug}: {e}")
+            return None
+
+    elif _CURL_AVAILABLE:
+        # Local path: curl-cffi direct
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.myfxbook.com/",
+        }
+        try:
+            resp = curl_requests.get(target_url, headers=headers, impersonate="chrome120", timeout=30)
+            if resp.status_code != 200:
+                print(f"    [MyFXBook] HTTP {resp.status_code} for {myfxbook_slug}")
+                return None
+            html = resp.text
+        except Exception as e:
+            print(f"    [MyFXBook] Error for {myfxbook_slug}: {e}")
+            return None
+    else:
+        print("    [MyFXBook] No SCRAPERAPI_KEY / WEBSHARE_PROXY_URL and curl-cffi unavailable — skipping")
+        return None
+
+    try:
         if len(html) < 1000 or "access denied" in html.lower():
             print(f"    [MyFXBook] Blocked for {myfxbook_slug}")
             return None
