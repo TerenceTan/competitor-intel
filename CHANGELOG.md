@@ -4,6 +4,73 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [Unreleased] — 2026-03-19 (Session 5: Security Hardening + QA Audit)
+
+### Security — Fixed
+
+- **Weak session token (critical)** — `src/middleware.ts`, `src/app/api/auth/login/route.ts`
+  Replaced reversible Java-style bitwise `simpleHash()` with SHA-256 via Node.js `node:crypto`. Added `export const runtime = "nodejs"` to middleware.
+
+- **Hardcoded password fallback (critical)** — `src/middleware.ts`, `src/app/api/auth/login/route.ts`
+  Removed `|| "pepperstone2026"` default. Server now returns HTTP 503 if `DASHBOARD_PASSWORD` is not set, rather than falling back to a known public password.
+
+- **Unprotected admin API route (critical)** — `src/app/api/admin/run-scraper/route.ts`
+  Added `isAuthenticated()` check using the SHA-256 cookie. Route previously had no auth — any caller could trigger scraper runs.
+
+- **Missing security headers** — `next.config.js`
+  Added `async headers()` block with: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`.
+
+- **NULL-unsafe `is_self` filter** — `src/app/api/competitors/route.ts`, `src/app/api/changes/route.ts`
+  Changed `ne(isSelf, 1)` to `or(eq(isSelf, 0), isNull(isSelf))` to correctly handle pre-migration rows where the column may be NULL.
+
+- **Pepperstone changes visible in change feed** — `src/app/api/changes/route.ts`
+  Added `ne(competitorId, "pepperstone")` filter so Pepperstone's own change events are excluded from the `/changes` UI.
+
+- **NULL backfill in migration** — `src/db/migrate.ts`
+  Added `UPDATE competitors SET is_self = 0 WHERE is_self IS NULL` and `UPDATE competitors SET is_self = 1 WHERE id = 'pepperstone'` to handle databases upgraded from older schema versions.
+
+---
+
+## [Unreleased] — 2026-03-19 (Session 4: Pepperstone Self-Benchmark + Crawler Blocking + UI)
+
+### Added
+
+- **Pepperstone self-benchmark scraping** — `scrapers/config.py`
+  Added `PEPPERSTONE_CONFIG` dict with full scraping config (Trustpilot, FPA, MyFXBook, pricing, promos, social). Added `ALL_BROKERS = COMPETITORS + [PEPPERSTONE_CONFIG]` list. All 6 scrapers now import `ALL_BROKERS as COMPETITORS` so Pepperstone is scraped on every run.
+
+- **`is_self` DB flag** — `scrapers/db_utils.py`, `src/db/schema.ts`, `src/db/migrate.ts`, `src/db/seed.ts`
+  New `is_self INTEGER DEFAULT 0` column on `competitors` table. Pepperstone is seeded with `is_self = 1`. `get_db()` runs the additive `ALTER TABLE` migration and `INSERT OR IGNORE` for the Pepperstone row on every DB open — fully idempotent.
+
+- **Pepperstone filtered from all UI and API** — `src/app/api/competitors/route.ts`, `src/app/api/changes/route.ts`
+  Both routes filter `is_self` so Pepperstone never appears in the dashboard competitor list or change feed.
+
+- **Live Pepperstone context in AI prompts** — `scrapers/ai_analyzer.py`
+  Added `get_pepperstone_snapshot(conn)` and `build_pepperstone_context(snap)`. Both `build_prompt()` and `build_portfolio_prompt()` now receive a `pepperstone_context` parameter populated with live scraped data (pricing, Trustpilot, FPA, App Store, MyFXBook ratings). Falls back gracefully to static description if no data has been scraped yet.
+
+- **Pepperstone excluded from change analysis** — `scrapers/ai_analyzer.py`
+  `fetch_todays_changes()` now JOINs `competitors` and filters `is_self = 0`, so Pepperstone's own metric changes are never analysed as competitive threats.
+
+- **`robots.txt`** — `public/robots.txt`
+  Created with `Disallow: /` for all crawlers plus explicit named blocks for: GPTBot, ChatGPT-User, OAI-SearchBot, ClaudeBot, anthropic-ai, Google-Extended, CCBot, Omgilibot, FacebookBot, Bytespider, Amazonbot, PerplexityBot.
+
+- **`noindex` / `nofollow`** — `src/app/layout.tsx`
+  Added `robots: { index: false, follow: false, googleBot: { index: false, follow: false } }` to global metadata so every page emits the appropriate meta tags.
+
+- **Scraper anonymisation** — `scrapers/config.py`, all scrapers
+  Added `SCRAPER_UA` and `SCRAPER_HEADERS` constants. All Playwright browser contexts now reference `SCRAPER_UA` (single source of truth instead of inline strings). `wikifx_scraper.py` std_requests fallback now includes `User-Agent`. `news_scraper.py` replaced `"CompetitorIntelBot/1.0; +https://techaway.online"` with generic Chrome UA.
+
+- **Recommended Actions styling** — `src/app/(dashboard)/page.tsx`
+  Sequential `01`/`02`/… numbering across all urgency groups. Urgency group headers now show an icon (`AlertCircle` / `Clock` / `Calendar`) and action count pill (e.g. "3 actions"). Cards have increased padding, shadow, and italic rationale text with a left border for visual hierarchy. Summary block is now italicised with a left accent border.
+
+### Fixed
+
+- **Webshare proxy for MyFXBook** — `scrapers/reputation_scraper.py`
+  Added `elif webshare_proxy:` branch between ScraperAPI and curl-cffi. Reads `WEBSHARE_PROXY_URL` env var. No new dependencies — uses existing `requests` library.
+
+---
+
+## [Unreleased] — 2026-03-17 (Session 3: Data Quality Fixes + Admin UX)
+
 ## [Unreleased] — 2026-03-17 (Session 3: Data Quality Fixes + Admin UX)
 
 ### Added
