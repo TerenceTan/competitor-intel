@@ -5,6 +5,7 @@ export const competitors = sqliteTable("competitors", {
   name: text("name").notNull(),
   tier: integer("tier").notNull(),
   website: text("website").notNull(),
+  isSelf: integer("is_self").notNull().default(0),
   createdAt: text("created_at").notNull().default(new Date().toISOString()),
 });
 

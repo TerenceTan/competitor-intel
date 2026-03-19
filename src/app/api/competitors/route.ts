@@ -7,10 +7,13 @@ import {
   promoSnapshots,
   aiInsights,
 } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, ne, or, isNull } from "drizzle-orm";
 
 export async function GET() {
-  const allCompetitors = await db.select().from(competitors);
+  const allCompetitors = await db
+    .select()
+    .from(competitors)
+    .where(or(eq(competitors.isSelf, 0), isNull(competitors.isSelf)));
 
   const results = await Promise.all(
     allCompetitors.map(async (competitor) => {

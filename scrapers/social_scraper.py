@@ -35,7 +35,7 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env.local"))
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
 
-from config import COMPETITORS, DELAY_BETWEEN_REQUESTS
+from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
 
 SCRAPER_NAME = "social_scraper"
@@ -224,11 +224,7 @@ async def scrape_all():
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            user_agent=SCRAPER_UA,
             viewport={"width": 1280, "height": 800},
         )
         page = await context.new_page()

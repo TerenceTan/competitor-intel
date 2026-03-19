@@ -230,6 +230,57 @@ COMPETITORS = [
 ]
 
 
-DB_PATH = "/home/ubuntu/app/data/competitor-intel.db" 
+DB_PATH = "/home/ubuntu/app/data/competitor-intel.db"
 #DB_PATH = "./data/competitor-intel.db" #for local
 DELAY_BETWEEN_REQUESTS = 2.5  # seconds
+
+# ---------------------------------------------------------------------------
+# Pepperstone self-benchmark config
+# Scraped like any competitor but flagged is_self=True; never appears in UI.
+# ---------------------------------------------------------------------------
+PEPPERSTONE_CONFIG = {
+    "id": "pepperstone",
+    "name": "Pepperstone",
+    "tier": 1,
+    "is_self": True,
+    "website": "pepperstone.com",
+    "pricing_url": "https://www.pepperstone.com/en/trading/trading-accounts/",
+    "promo_url": "https://www.pepperstone.com/en/promotions/",
+    "youtube_query": "Pepperstone trading",
+    "telegram_handle": None,
+    "pricing_wait_selector": None,
+    "wikifx_id": None,           # fill in from WikiFX if desired
+    "myfxbook_slug": "pepperstone",
+    "entities": [
+        {
+            "label": "Pepperstone",
+            "trustpilot_slug": "pepperstone.com",
+            "fpa_slug": "pepperstone",
+            "ios_app_id": None,      # fill in from App Store
+            "android_package": None,  # fill in from Play Store
+        },
+    ],
+}
+
+# ALL_BROKERS includes Pepperstone; use in scrapers that collect data for everyone.
+# COMPETITORS excludes Pepperstone; use in the AI analyzer and competitor-only views.
+ALL_BROKERS = COMPETITORS + [PEPPERSTONE_CONFIG]
+
+# ---------------------------------------------------------------------------
+# Shared scraper headers — generic browser identity, no Pepperstone signals
+# ---------------------------------------------------------------------------
+SCRAPER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+SCRAPER_HEADERS = {
+    "User-Agent": SCRAPER_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "DNT": "1",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}

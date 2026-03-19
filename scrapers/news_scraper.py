@@ -27,7 +27,7 @@ _SCRAPERS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
 
-from config import COMPETITORS, DELAY_BETWEEN_REQUESTS
+from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA
 from db_utils import get_db, log_scraper_run, update_scraper_run
 
 SCRAPER_NAME = "news_scraper"
@@ -98,10 +98,7 @@ def fetch_rss(competitor_name: str) -> list[dict]:
     url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (compatible; CompetitorIntelBot/1.0; "
-            "+https://techaway.online)"
-        ),
+        "User-Agent": SCRAPER_UA,
         "Accept": "application/rss+xml, application/xml, text/xml",
     }
 

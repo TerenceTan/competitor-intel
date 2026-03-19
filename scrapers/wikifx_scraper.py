@@ -28,7 +28,7 @@ _PROJECT_ROOT = os.path.dirname(_SCRAPERS_DIR)
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
 
-from config import COMPETITORS, DELAY_BETWEEN_REQUESTS
+from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
 
 SCRAPER_NAME = "wikifx_scraper"
@@ -53,6 +53,7 @@ def _fetch(url: str, timeout: int = 30) -> tuple[int, str]:
     Returns (status_code, html).
     """
     headers = {
+        "User-Agent": SCRAPER_UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",

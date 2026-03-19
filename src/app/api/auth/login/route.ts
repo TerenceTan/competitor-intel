@@ -1,24 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16);
+function deriveToken(password: string): string {
+  return createHash("sha256").update(password).digest("hex");
 }
 
 export async function POST(request: NextRequest) {
   const { password } = await request.json();
-  const expectedPassword = process.env.DASHBOARD_PASSWORD || "pepperstone2026";
+
+  const expectedPassword = process.env.DASHBOARD_PASSWORD;
+  if (!expectedPassword) {
+    return NextResponse.json({ error: "Server misconfiguration" }, { status: 503 });
+  }
 
   if (password !== expectedPassword) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
-  const tokenValue = simpleHash(expectedPassword);
+  const tokenValue = deriveToken(expectedPassword);
 
   const response = NextResponse.json({ success: true });
   response.cookies.set("auth_token", tokenValue, {

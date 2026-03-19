@@ -12,6 +12,11 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "Competitor Intelligence Dashboard — Pepperstone APAC",
   description: "Competitor monitoring and analysis for Pepperstone APAC marketing team",
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: { index: false, follow: false },
+  },
 };
 
 export default function RootLayout({

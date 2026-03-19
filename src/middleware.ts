@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16);
+// Use Node.js runtime so we can use crypto
+export const runtime = "nodejs";
+
+/**
+ * Derive a session token from the dashboard password using SHA-256.
+ * Not a replacement for proper auth (no salt, no bcrypt) — but orders
+ * of magnitude better than the previous Java-style bitwise hash which
+ * was trivially reversible.
+ */
+function deriveToken(password: string): string {
+  return createHash("sha256").update(password).digest("hex");
 }
 
 export function middleware(request: NextRequest) {
@@ -18,9 +22,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const password = process.env.DASHBOARD_PASSWORD;
+  if (!password) {
+    // Refuse to serve the app rather than fall back to a known default
+    return new NextResponse("Server misconfiguration: DASHBOARD_PASSWORD is not set.", {
+      status: 503,
+    });
+  }
+
   const authToken = request.cookies.get("auth_token")?.value;
-  const password = process.env.DASHBOARD_PASSWORD || "pepperstone2026";
-  const expectedToken = simpleHash(password);
+  const expectedToken = deriveToken(password);
 
   if (authToken !== expectedToken) {
     const loginUrl = new URL("/login", request.url);

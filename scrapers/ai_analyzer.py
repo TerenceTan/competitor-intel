@@ -152,15 +152,18 @@ INSIGHT_TOOL = {
 def fetch_todays_changes(conn) -> dict[str, list[dict]]:
     """
     Return a dict mapping competitor_id -> list of change_event dicts
-    for events detected today (UTC).
+    for events detected today (UTC). Excludes self (Pepperstone).
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows = conn.execute(
         """
-        SELECT competitor_id, domain, field_name, old_value, new_value, severity, detected_at
-        FROM change_events
-        WHERE detected_at LIKE ?
-        ORDER BY competitor_id, detected_at
+        SELECT ce.competitor_id, ce.domain, ce.field_name, ce.old_value,
+               ce.new_value, ce.severity, ce.detected_at
+        FROM change_events ce
+        JOIN competitors c ON c.id = ce.competitor_id
+        WHERE ce.detected_at LIKE ?
+          AND (c.is_self IS NULL OR c.is_self = 0)
+        ORDER BY ce.competitor_id, ce.detected_at
         """,
         (f"{today}%",),
     ).fetchall()
@@ -195,11 +198,57 @@ def get_recent_news(conn, competitor_id: str, limit: int = 5) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_pepperstone_snapshot(conn) -> dict:
+    """Fetch the latest scraped snapshots for Pepperstone (self-benchmark)."""
+    pricing = conn.execute(
+        "SELECT * FROM pricing_snapshots WHERE competitor_id = 'pepperstone' ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+    reputation = conn.execute(
+        "SELECT * FROM reputation_snapshots WHERE competitor_id = 'pepperstone' ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+    return {
+        "pricing": dict(pricing) if pricing else {},
+        "reputation": dict(reputation) if reputation else {},
+    }
+
+
+def build_pepperstone_context(snap: dict) -> str:
+    """Build a live-data Pepperstone context block for AI prompts."""
+    p = snap.get("pricing", {})
+    r = snap.get("reputation", {})
+    lines = [
+        "Context about Pepperstone (live scraped data):",
+        "- Primary markets: Australia, UK, Europe, APAC",
+        "- Regulation: ASIC, FCA, CySEC, DFSA, SCB, BaFin",
+        "- Platforms: MetaTrader 4/5, cTrader, TradingView",
+        "- Target clients: active retail traders, professional traders, algo traders",
+    ]
+    if p.get("min_deposit_usd"):
+        lines.append(f"- Current min deposit: ${p['min_deposit_usd']:.0f} USD")
+    if p.get("leverage_json"):
+        lines.append(f"- Current leverage: {p['leverage_json']}")
+    if p.get("instruments_count"):
+        lines.append(f"- Instruments count: {p['instruments_count']}")
+    if r.get("trustpilot_score"):
+        tc = r.get("trustpilot_count", "?")
+        lines.append(f"- Trustpilot: {r['trustpilot_score']:.1f} ({tc} reviews)")
+    if r.get("fpa_rating"):
+        lines.append(f"- ForexPeaceArmy rating: {r['fpa_rating']:.1f}")
+    if r.get("ios_rating"):
+        lines.append(f"- App Store rating: {r['ios_rating']:.1f}")
+    if r.get("myfxbook_rating"):
+        lines.append(f"- MyFXBook rating: {r['myfxbook_rating']:.1f}")
+    if len(lines) == 5:
+        # No live data yet — fall back to static description
+        lines.append("- Key differentiators: tight spreads on major FX pairs, fast execution (<40 ms avg)")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
 
-def build_portfolio_prompt(all_insights: list[dict]) -> str:
+def build_portfolio_prompt(all_insights: list[dict], pepperstone_context: str) -> str:
     """
     Build a prompt that feeds all per-competitor insights into Claude
     to produce one consolidated recommended action list.
@@ -231,23 +280,20 @@ Below are today's competitive intelligence reports for each competitor where cha
 
 {competitors_block}
 
-Context about Pepperstone:
-- Primary markets: Australia, UK, Europe, APAC
-- Key differentiators: tight spreads on major FX pairs, fast execution, strong regulation (ASIC, FCA, CySEC, DFSA, SCB, BaFID)
-- Target clients: active retail traders, professional traders, algo traders
-- Strong in MetaTrader 4/5 and cTrader platforms
+{pepperstone_context}
 
 Your task:
 Synthesise ALL of the above into ONE consolidated, prioritised action plan for Pepperstone.
 - Remove duplicate or near-duplicate actions — keep only the most impactful version.
 - Elevate urgency where multiple competitors are moving in the same direction.
+- Where relevant, reference specific Pepperstone metrics above (e.g. "our Trustpilot is X vs competitor Y") to make recommendations data-driven.
 - Each action must name the competitor(s) that triggered it in the rationale.
 - Aim for 5–10 actions total, ordered by urgency (immediate first).
 
 Use the record_portfolio_actions tool to return your analysis."""
 
 
-def build_prompt(competitor: dict, changes: list[dict], recent_news: list[dict]) -> str:
+def build_prompt(competitor: dict, changes: list[dict], recent_news: list[dict], pepperstone_context: str) -> str:
     tier_labels = {1: "Tier 1 (major global broker)", 2: "Tier 2 (regional broker)", 3: "Tier 3 (smaller/niche broker)"}
     tier_desc = tier_labels.get(competitor.get("tier", 1), "Unknown tier")
 
@@ -275,18 +321,15 @@ Change events detected today ({datetime.now(timezone.utc).strftime('%Y-%m-%d')})
 {changes_text}
 {news_text}
 
-Context about Pepperstone:
-- Primary markets: Australia, UK, Europe, APAC
-- Key differentiators: tight spreads on major FX pairs, fast execution, strong regulation (ASIC, FCA, CySEC, DFSA, SCB, BaFID)
-- Target clients: active retail traders, professional traders, algo traders
-- Strong in MetaTrader 4/5 and cTrader platforms
+{pepperstone_context}
 
 Your task:
 Analyze the competitor's changes from Pepperstone's perspective. Consider:
 1. Do these changes represent a genuine competitive threat or opportunity for Pepperstone?
 2. Are they becoming more aggressive on pricing (spreads, leverage, deposits)?
 3. Are promotions designed to poach Pepperstone's client segments?
-4. What should Pepperstone's commercial, product, or marketing teams do in response?
+4. Where relevant, directly compare the competitor's metrics to Pepperstone's live data above.
+5. What should Pepperstone's commercial, product, or marketing teams do in response?
 
 Use the record_competitive_insight tool to return your analysis in structured JSON format.
 Be specific, evidence-based, and commercially focused. Avoid generic observations."""
@@ -319,7 +362,11 @@ def run():
     # Build a lookup for competitor config (from COMPETITORS list)
     comp_config = {c["id"]: c for c in COMPETITORS}
 
-    # Get today's changes grouped by competitor
+    # Fetch live Pepperstone benchmark data for prompt context
+    pepperstone_snap = get_pepperstone_snapshot(conn)
+    pepperstone_context = build_pepperstone_context(pepperstone_snap)
+
+    # Get today's changes grouped by competitor (excludes Pepperstone)
     todays_changes = fetch_todays_changes(conn)
 
     if not todays_changes:
@@ -348,7 +395,7 @@ def run():
                 competitor = {"id": competitor_id, "name": competitor_id, "tier": 1, "website": ""}
 
         recent_news = get_recent_news(conn, competitor_id)
-        prompt = build_prompt(competitor, changes, recent_news)
+        prompt = build_prompt(competitor, changes, recent_news, pepperstone_context)
 
         try:
             response = client.messages.create(
@@ -418,7 +465,7 @@ def run():
     if all_insights_for_portfolio:
         print(f"\nGenerating consolidated portfolio actions from {len(all_insights_for_portfolio)} competitor(s)...")
         try:
-            portfolio_prompt = build_portfolio_prompt(all_insights_for_portfolio)
+            portfolio_prompt = build_portfolio_prompt(all_insights_for_portfolio, pepperstone_context)
             portfolio_response = client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=2048,

@@ -24,6 +24,23 @@ def get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+
+    # Additive migration: is_self flag (safe to run repeatedly)
+    try:
+        conn.execute("ALTER TABLE competitors ADD COLUMN is_self INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Ensure Pepperstone exists as the self-benchmark row
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO competitors (id, name, tier, website, is_self)
+        VALUES ('pepperstone', 'Pepperstone', 1, 'pepperstone.com', 1)
+        """
+    )
+    conn.commit()
+
     return conn
 
 
@@ -131,9 +148,15 @@ def upsert_competitor(conn: sqlite3.Connection, competitor: dict):
     """Insert or replace a competitor record."""
     conn.execute(
         """
-        INSERT OR REPLACE INTO competitors (id, name, tier, website)
-        VALUES (:id, :name, :tier, :website)
+        INSERT OR REPLACE INTO competitors (id, name, tier, website, is_self)
+        VALUES (:id, :name, :tier, :website, :is_self)
         """,
-        competitor,
+        {
+            "id": competitor["id"],
+            "name": competitor["name"],
+            "tier": competitor["tier"],
+            "website": competitor["website"],
+            "is_self": 1 if competitor.get("is_self") else 0,
+        },
     )
     conn.commit()

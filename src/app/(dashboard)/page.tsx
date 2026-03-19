@@ -10,7 +10,7 @@ import { desc, eq } from "drizzle-orm";
 import { Card } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import Link from "next/link";
-import { Clock, TrendingUp, Zap } from "lucide-react";
+import { AlertCircle, Calendar, Clock, TrendingUp, Zap } from "lucide-react";
 import { TimeAgo } from "@/components/ui/time-ago";
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -108,40 +108,56 @@ export default async function ExecutiveSummaryPage() {
           let actions: PortfolioAction[] = [];
           try { actions = latestPortfolio.actionsJson ? JSON.parse(latestPortfolio.actionsJson) : []; } catch {}
 
-          const urgencyConfig: Record<string, { label: string; border: string; badge: string }> = {
-            immediate: { label: "Immediate", border: "border-l-red-400",   badge: "bg-red-50 text-red-700 border-red-200" },
-            this_week: { label: "This Week",  border: "border-l-amber-400", badge: "bg-amber-50 text-amber-700 border-amber-200" },
-            this_month: { label: "This Month", border: "border-l-blue-400",  badge: "bg-blue-50 text-blue-700 border-blue-200" },
+          type UrgencyKey = "immediate" | "this_week" | "this_month";
+          const urgencyConfig: Record<UrgencyKey, { label: string; border: string; badge: string; icon: React.ElementType; iconColor: string }> = {
+            immediate: { label: "Immediate",  border: "border-l-red-400",   badge: "bg-red-50 text-red-700 border-red-200",   icon: AlertCircle, iconColor: "text-red-400" },
+            this_week: { label: "This Week",  border: "border-l-amber-400", badge: "bg-amber-50 text-amber-700 border-amber-200", icon: Clock,        iconColor: "text-amber-400" },
+            this_month: { label: "This Month", border: "border-l-blue-400",  badge: "bg-blue-50 text-blue-700 border-blue-200",  icon: Calendar,     iconColor: "text-blue-400" },
           };
 
+          // Running counter across all groups for sequential numbering
+          let globalIdx = 0;
+
           return (
-            <div className="space-y-3">
+            <div className="space-y-5">
               {latestPortfolio.summary && (
-                <p className="text-gray-600 text-sm leading-relaxed mb-4">{latestPortfolio.summary}</p>
+                <p className="text-gray-600 text-sm leading-relaxed border-l-4 border-gray-200 pl-3 italic">{latestPortfolio.summary}</p>
               )}
-              {(["immediate", "this_week", "this_month"] as const).map((urgency) => {
+              {(["immediate", "this_week", "this_month"] as UrgencyKey[]).map((urgency) => {
                 const group = actions.filter((a) => a.urgency === urgency);
                 if (!group.length) return null;
                 const cfg = urgencyConfig[urgency];
+                const Icon = cfg.icon;
                 return (
                   <div key={urgency}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.badge}`}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Icon className={`w-3.5 h-3.5 ${cfg.iconColor}`} />
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${cfg.badge}`}>
                         {cfg.label}
                       </span>
+                      <span className="text-xs text-gray-400">{group.length} action{group.length !== 1 ? "s" : ""}</span>
                     </div>
-                    <div className="space-y-2">
-                      {group.map((a, i) => (
-                        <div
-                          key={i}
-                          className={`flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-100 border-l-4 bg-white ${cfg.border}`}
-                        >
-                          <p className="text-sm font-medium text-gray-800">{a.action}</p>
-                          {a.rationale && (
-                            <p className="text-xs text-gray-500">{a.rationale}</p>
-                          )}
-                        </div>
-                      ))}
+                    <div className="space-y-2.5">
+                      {group.map((a) => {
+                        globalIdx += 1;
+                        const num = globalIdx;
+                        return (
+                          <div
+                            key={num}
+                            className={`flex gap-3 px-4 py-4 rounded-lg border border-gray-100 border-l-4 bg-white shadow-sm ${cfg.border}`}
+                          >
+                            <span className="flex-shrink-0 text-xs font-mono font-bold text-gray-300 mt-0.5 w-5 select-none">
+                              {String(num).padStart(2, "0")}
+                            </span>
+                            <div className="flex flex-col gap-1.5 min-w-0">
+                              <p className="text-sm font-semibold text-gray-800 leading-snug">{a.action}</p>
+                              {a.rationale && (
+                                <p className="text-xs text-gray-500 italic border-l-2 border-gray-200 pl-2 leading-relaxed">{a.rationale}</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );

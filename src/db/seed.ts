@@ -3,16 +3,18 @@ import { runMigrations } from "./migrate";
 import { competitors, markets, pricingSnapshots, promoSnapshots, reputationSnapshots, changeEvents, aiInsights, socialSnapshots, newsItems } from "./schema";
 
 const COMPETITORS = [
-  { id: "ic-markets", name: "IC Markets", tier: 1, website: "icmarkets.com" },
-  { id: "exness", name: "Exness", tier: 1, website: "exness.com" },
-  { id: "vantage", name: "Vantage Markets", tier: 1, website: "vantagemarkets.com" },
-  { id: "xm", name: "XM Group", tier: 1, website: "xm.com" },
-  { id: "hfm", name: "HFM", tier: 1, website: "hfm.com" },
-  { id: "fbs", name: "FBS", tier: 2, website: "fbs.com" },
-  { id: "iux", name: "IUX", tier: 2, website: "iux.com" },
-  { id: "fxpro", name: "FxPro", tier: 2, website: "fxpro.com" },
-  { id: "mitrade", name: "Mitrade", tier: 2, website: "mitrade.com" },
-  { id: "tmgm", name: "TMGM", tier: 2, website: "tmgm.com" },
+  { id: "ic-markets", name: "IC Markets", tier: 1, website: "icmarkets.com", isSelf: 0 },
+  { id: "exness", name: "Exness", tier: 1, website: "exness.com", isSelf: 0 },
+  { id: "vantage", name: "Vantage Markets", tier: 1, website: "vantagemarkets.com", isSelf: 0 },
+  { id: "xm", name: "XM Group", tier: 1, website: "xm.com", isSelf: 0 },
+  { id: "hfm", name: "HFM", tier: 1, website: "hfm.com", isSelf: 0 },
+  { id: "fbs", name: "FBS", tier: 2, website: "fbs.com", isSelf: 0 },
+  { id: "iux", name: "IUX", tier: 2, website: "iux.com", isSelf: 0 },
+  { id: "fxpro", name: "FxPro", tier: 2, website: "fxpro.com", isSelf: 0 },
+  { id: "mitrade", name: "Mitrade", tier: 2, website: "mitrade.com", isSelf: 0 },
+  { id: "tmgm", name: "TMGM", tier: 2, website: "tmgm.com", isSelf: 0 },
+  // Pepperstone — self-benchmark, scraped but excluded from competitor UI
+  { id: "pepperstone", name: "Pepperstone", tier: 1, website: "pepperstone.com", isSelf: 1 },
 ];
 
 const MARKETS = [

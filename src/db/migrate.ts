@@ -126,4 +126,21 @@ export function runMigrations() {
     marketing_strategy_json TEXT,
     biz_area_json TEXT
   )`);
+
+  // is_self column — identifies Pepperstone as the self-benchmark (not a competitor)
+  try {
+    sqlite.exec(`ALTER TABLE competitors ADD COLUMN is_self INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore
+  }
+  // Backfill any pre-migration rows that may have NULL (SQLite allows this on some paths)
+  sqlite.exec(`UPDATE competitors SET is_self = 0 WHERE is_self IS NULL AND id != 'pepperstone'`);
+
+  // Ensure Pepperstone exists as the self-benchmark row
+  sqlite.exec(`
+    INSERT OR IGNORE INTO competitors (id, name, tier, website, is_self)
+    VALUES ('pepperstone', 'Pepperstone', 1, 'pepperstone.com', 1)
+  `);
+  // Ensure existing Pepperstone row has is_self = 1 (in case it was added before this migration)
+  sqlite.exec(`UPDATE competitors SET is_self = 1 WHERE id = 'pepperstone'`);
 }
