@@ -9,6 +9,7 @@ import {
   Activity,
   Lightbulb,
   Settings,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,11 @@ const navItems = [
     label: "AI Insights",
     href: "/insights",
     icon: Lightbulb,
+  },
+  {
+    label: "Our Data",
+    href: "/pepperstone",
+    icon: Target,
   },
   {
     label: "Admin",

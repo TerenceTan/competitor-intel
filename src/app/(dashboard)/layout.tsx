@@ -4,6 +4,7 @@ import { desc } from "drizzle-orm";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileHeader } from "@/components/layout/mobile-header";
 import { formatDateTime } from "@/lib/utils";
+import { FlaskConical } from "lucide-react";
 
 // Dashboard pages query the SQLite DB at render time — never prerender statically
 export const dynamic = "force-dynamic";
@@ -24,9 +25,17 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-slate-50">
+      {/* Notice bar */}
+      <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-xs font-medium">
+        <FlaskConical className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+        <span>
+          <strong>Beta:</strong> This dashboard is under active development. Data accuracy is being validated — some metrics may not yet fully reflect real-time figures.
+        </span>
+      </div>
+
       <Sidebar competitorCount={competitorCount} />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 pt-9">
         {/* Top header */}
         <header
           className="flex items-center justify-between px-4 md:px-6 py-3 border-b border-gray-200 shrink-0 bg-white"
