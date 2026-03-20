@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
-
-// Use Node.js runtime so we can use crypto
-export const runtime = "nodejs";
 
 /**
  * Derive a session token from the dashboard password using SHA-256.
- * Not a replacement for proper auth (no salt, no bcrypt) — but orders
- * of magnitude better than the previous Java-style bitwise hash which
- * was trivially reversible.
+ * Uses Web Crypto API (available in the Edge runtime).
  */
-function deriveToken(password: string): string {
-  return createHash("sha256").update(password).digest("hex");
+async function deriveToken(password: string): Promise<string> {
+  const encoded = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow login page and auth API routes
@@ -31,11 +29,10 @@ export function middleware(request: NextRequest) {
   }
 
   const authToken = request.cookies.get("auth_token")?.value;
-  const expectedToken = deriveToken(password);
+  const expectedToken = await deriveToken(password);
 
   if (authToken !== expectedToken) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   return NextResponse.next();

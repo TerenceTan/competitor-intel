@@ -24,10 +24,10 @@ export default async function DashboardLayout({
   const lastUpdated = lastRun?.finishedAt ?? null;
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen bg-slate-50 pt-11">
       {/* Notice bar */}
-      <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-xs font-medium">
-        <FlaskConical className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+      <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 border-b border-blue-200 text-blue-800 text-sm font-medium">
+        <FlaskConical className="w-4 h-4 shrink-0 text-blue-500" />
         <span>
           <strong>Beta:</strong> This dashboard is under active development. We are actively expanding the scraping module — more data and coverage will be included over the next few days.
         </span>
@@ -35,7 +35,7 @@ export default async function DashboardLayout({
 
       <Sidebar competitorCount={competitorCount} />
 
-      <div className="flex-1 flex flex-col min-w-0 pt-9">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top header */}
         <header
           className="flex items-center justify-between px-4 md:px-6 py-3 border-b border-gray-200 shrink-0 bg-white"

@@ -231,7 +231,7 @@ COMPETITORS = [
 
 
 DB_PATH = "/home/ubuntu/app/data/competitor-intel.db"
-#DB_PATH = "./data/competitor-intel.db" #for local
+# DB_PATH = "./data/competitor-intel.db" #for local
 DELAY_BETWEEN_REQUESTS = 2.5  # seconds
 
 # ---------------------------------------------------------------------------
@@ -244,20 +244,20 @@ PEPPERSTONE_CONFIG = {
     "tier": 1,
     "is_self": True,
     "website": "pepperstone.com",
-    "pricing_url": "https://www.pepperstone.com/en/trading/trading-accounts/",
-    "promo_url": "https://www.pepperstone.com/en/promotions/",
-    "youtube_query": "Pepperstone trading",
+    "pricing_url": "https://pepperstone.com/en/ways-to-trade/pricing/",
+    "promo_url": None,
+    "youtube_query": "Pepperstone",
     "telegram_handle": None,
     "pricing_wait_selector": None,
-    "wikifx_id": None,           # fill in from WikiFX if desired
+    "wikifx_id": "0361453884",           # fill in from WikiFX if desired
     "myfxbook_slug": "pepperstone",
     "entities": [
         {
             "label": "Pepperstone",
             "trustpilot_slug": "pepperstone.com",
             "fpa_slug": "pepperstone",
-            "ios_app_id": None,      # fill in from App Store
-            "android_package": None,  # fill in from Play Store
+            "ios_app_id": "6445829881",      # fill in from App Store
+            "android_package": "com.pepperstone.app",  # fill in from Play Store
         },
     ],
 }
