@@ -29,7 +29,7 @@ export default async function DashboardLayout({
       <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-xs font-medium">
         <FlaskConical className="w-3.5 h-3.5 shrink-0 text-blue-500" />
         <span>
-          <strong>Beta:</strong> This dashboard is under active development. Data accuracy is being validated — some metrics may not yet fully reflect real-time figures.
+          <strong>Beta:</strong> This dashboard is under active development. We are actively expanding the scraping module — more data and coverage will be included over the next few days.
         </span>
       </div>
 
