@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
-import { createHash } from "node:crypto";
+import { createHash } from "crypto";
 
 const SCRAPER_FILES: Record<string, string> = {
   "pricing-scraper": "pricing_scraper.py",

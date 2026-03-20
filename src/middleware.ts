@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
+import { createHash } from "crypto";
 
 // Use Node.js runtime so we can use crypto
 export const runtime = "nodejs";

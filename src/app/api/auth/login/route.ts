@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
+import { createHash } from "crypto";
 
 function deriveToken(password: string): string {
   return createHash("sha256").update(password).digest("hex");
