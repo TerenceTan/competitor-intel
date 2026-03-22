@@ -32,6 +32,13 @@ def get_db() -> sqlite3.Connection:
     except Exception:
         pass  # column already exists
 
+    # Additive migration: spread data from WikiFX
+    try:
+        conn.execute("ALTER TABLE pricing_snapshots ADD COLUMN spread_json TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
@@ -104,7 +111,7 @@ def detect_change(
     are handled uniformly.
     """
     if new_value is None:
-        # Nothing to compare; skip recording a change.
+        print(f"  [detect_change] Skipping {competitor_id}/{domain}/{field} — new_value is None")
         return False
 
     new_str = json.dumps(new_value) if not isinstance(new_value, str) else new_value

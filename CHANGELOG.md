@@ -4,6 +4,32 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [Unreleased] — 2026-03-22 (Session 7: QA Audit Fixes)
+
+### Fixed — Critical
+
+- **Fresh-install schema mismatch** — `src/db/migrate.ts`
+  Added `is_self INTEGER NOT NULL DEFAULT 0` to the initial `CREATE TABLE competitors` and `spread_json TEXT` to `CREATE TABLE pricing_snapshots`. Previously both were only added via `ALTER TABLE` after initial create, causing Drizzle ORM constraint failures and missing spread data on clean installs. The `ALTER TABLE` guards remain for existing databases.
+
+- **Unbounded scraper process spawning** — `src/app/api/admin/run-scraper/route.ts`
+  Added in-memory concurrency lock (`runningScraperName`) so only one scraper can run at a time — returns HTTP 409 if already running. Added per-IP rate limiter (max 10 starts per 15 min) returning HTTP 429. Fixed `req.json()` to safely parse with a `.catch(() => ({}))` fallback and validate `scraper` is a string before use.
+
+- **No brute-force protection on login** — `src/app/api/auth/login/route.ts`
+  Added per-IP failed-attempt tracker: max 5 failed logins per 15 minutes, returns HTTP 429 with retry countdown. Successful login clears the counter. Upgraded session cookie from `sameSite: "lax"` to `sameSite: "strict"`. Added safe body parsing fallback.
+
+### Fixed — Medium
+
+- **Silent leverage JSON parse failures** — `src/app/api/competitors/route.ts`
+  Added `console.error` to the catch block so malformed `leverage_json` is logged with competitor ID rather than silently returning null.
+
+- **`detect_change()` skips without logging** — `scrapers/db_utils.py`
+  Added print statement when `new_value is None` so skipped change detection is visible in scraper output.
+
+- **Entity-level errors not surfaced in scraper run summary** — `scrapers/reputation_scraper.py`
+  `scrape_entity()` now collects per-source errors (Trustpilot, FPA, Google Play, App Store) into an `errors` list on its return dict. The caller in `scrape_all()` pops and propagates these into `error_summary`, so the run's final status and `error_message` column accurately reflect entity-level failures.
+
+---
+
 ## [Unreleased] — 2026-03-22 (Session 6: Pricing Scraper — WikiFX Leverage + Type Fixes)
 
 ### Fixed

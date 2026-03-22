@@ -392,6 +392,7 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
         "fpa_rating": None,
         "ios_rating": None,
         "android_rating": None,
+        "errors": [],
     }
 
     # --- Trustpilot ---
@@ -402,7 +403,9 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
             result["trustpilot_count"] = tp_count
             print(f"      [{label}] Trustpilot: score={tp_score}, reviews={tp_count}")
         except Exception as e:
+            msg = f"{label}/trustpilot: {e}"
             print(f"      [{label}] Trustpilot error: {e}")
+            result["errors"].append(msg)
         await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     # --- FPA ---
@@ -411,7 +414,9 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
             result["fpa_rating"] = await scrape_fpa(page, fpa_slug)
             print(f"      [{label}] FPA: rating={result['fpa_rating']}")
         except Exception as e:
+            msg = f"{label}/fpa: {e}"
             print(f"      [{label}] FPA error: {e}")
+            result["errors"].append(msg)
         await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     # --- Google Play ---
@@ -422,7 +427,9 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
             result["android_rating"] = await scrape_google_play_search(page, broker_name)
         print(f"      [{label}] Google Play: rating={result['android_rating']}")
     except Exception as e:
+        msg = f"{label}/google-play: {e}"
         print(f"      [{label}] Google Play error: {e}")
+        result["errors"].append(msg)
     await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     # --- App Store ---
@@ -433,7 +440,9 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
             result["ios_rating"] = scrape_app_store_search(broker_name)
         print(f"      [{label}] App Store: rating={result['ios_rating']}")
     except Exception as e:
+        msg = f"{label}/app-store: {e}"
         print(f"      [{label}] App Store error: {e}")
+        result["errors"].append(msg)
     await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     return result
@@ -480,6 +489,9 @@ async def scrape_all():
             for entity in entities:
                 try:
                     result = await scrape_entity(page, entity, name)
+                    # Propagate per-source errors into the run error summary
+                    for err in result.pop("errors", []):
+                        error_summary.append(f"{name}/{err}")
                     entity_results.append(result)
                 except Exception as e:
                     print(f"    [Entity {entity.get('label')}] Unhandled error: {e}")

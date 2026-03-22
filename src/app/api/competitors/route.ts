@@ -57,22 +57,24 @@ export async function GET() {
         .orderBy(desc(aiInsights.generatedAt))
         .limit(1);
 
-      // Max leverage from latest pricing — values stored as "1:1000" strings
+      // Max leverage from latest pricing — values stored as ["1:200", "1:1000"]
       let maxLeverage: number | null = null;
       if (pricing?.leverageJson) {
         try {
           const lev = JSON.parse(pricing.leverageJson);
           if (typeof lev === "object" && lev !== null) {
-            const vals = Object.values(lev)
+            const vals = (Object.values(lev) as unknown[])
               .map((v) => {
                 if (typeof v === "number") return v;
                 if (typeof v === "string" && v.includes(":")) return parseInt(v.split(":")[1], 10);
                 return NaN;
               })
-              .filter((v) => !isNaN(v));
+              .filter((v) => !isNaN(v as number)) as number[];
             maxLeverage = vals.length > 0 ? Math.max(...vals) : null;
           }
-        } catch {}
+        } catch (e) {
+          console.error(`[competitors] Failed to parse leverage_json for ${competitor.id}:`, e);
+        }
       }
 
       return {

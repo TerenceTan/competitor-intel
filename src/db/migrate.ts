@@ -7,6 +7,7 @@ export function runMigrations() {
       name TEXT NOT NULL,
       tier INTEGER NOT NULL,
       website TEXT NOT NULL,
+      is_self INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -26,7 +27,8 @@ export function runMigrations() {
       account_types_json TEXT,
       min_deposit_usd REAL,
       instruments_count INTEGER,
-      funding_methods_json TEXT
+      funding_methods_json TEXT,
+      spread_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS promo_snapshots (
@@ -126,6 +128,12 @@ export function runMigrations() {
     marketing_strategy_json TEXT,
     biz_area_json TEXT
   )`);
+
+  try {
+    sqlite.exec(`ALTER TABLE pricing_snapshots ADD COLUMN spread_json TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   // is_self column — identifies Pepperstone as the self-benchmark (not a competitor)
   try {
