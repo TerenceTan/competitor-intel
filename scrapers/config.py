@@ -251,6 +251,9 @@ PEPPERSTONE_CONFIG = {
     "pricing_wait_selector": None,
     "wikifx_id": "0361453884",           # fill in from WikiFX if desired
     "myfxbook_slug": "pepperstone",
+    # Known authoritative values used as fallback when scraping cannot extract them
+    "known_leverage": ["1:200", "1:1000"],     # Retail 1:200, Pro client 1:1000
+    "known_account_types": ["Razor", "Standard"],
     "entities": [
         {
             "label": "Pepperstone",

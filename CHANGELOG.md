@@ -4,6 +4,21 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [Unreleased] — 2026-03-22 (Session 6: Pricing Scraper — WikiFX Leverage + Type Fixes)
+
+### Fixed
+
+- **WikiFX leverage not extracted** — `scrapers/pricing_scraper.py`
+  Added `_parse_leverage_value()` helper that handles all common leverage formats (`1:500`, `500:1`, plain `500`, `x500`). WikiFX enrichment now also falls back to a full page-text scan when no account table is found, catching leverage data in non-table HTML layouts.
+
+- **Pyre2 type errors** — `scrapers/pricing_scraper.py`
+  Annotated `result` dict as `dict[str, object]` to resolve bad-argument-type errors on `min_deposit_usd` and `instruments_count` assignments. Added explicit `status: int` / `html: str` annotations to unpack from `_fetch()` return value. Added `# type: ignore[import]` to dynamic `sys.path` imports (`playwright`, `config`, `db_utils`, `wikifx_scraper`) which are valid at runtime but unresolvable by Pyre2 static analysis.
+
+- **Pepperstone account types incorrect in DB** — `scrapers/pricing_scraper.py`, `scrapers/config.py`
+  Added `"Razor"` and `"Razor+"` to the known account type list in `_extract_account_types()`. Added `known_leverage` and `known_account_types` authoritative override fields to `PEPPERSTONE_CONFIG` (`["1:200", "1:1000"]` and `["Razor", "Standard"]` respectively). These config values now always override scraped results so stale/incorrect extractions are never persisted. Existing DB rows were patched directly.
+
+---
+
 ## [Unreleased] — 2026-03-19 (Session 5: Security Hardening + QA Audit)
 
 ### Security — Fixed
