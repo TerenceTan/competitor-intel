@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { competitors, scraperRuns } from "@/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileHeader } from "@/components/layout/mobile-header";
 import { formatDateTime } from "@/lib/utils";
@@ -14,7 +14,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const allCompetitors = await db.select().from(competitors);
+  const allCompetitors = await db.select().from(competitors).where(eq(competitors.isSelf, 0));
   const competitorCount = allCompetitors.length;
   const [lastRun] = await db
     .select({ finishedAt: scraperRuns.finishedAt })

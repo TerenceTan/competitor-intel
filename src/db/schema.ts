@@ -26,6 +26,7 @@ export const pricingSnapshots = sqliteTable("pricing_snapshots", {
   minDepositUsd: real("min_deposit_usd"),
   instrumentsCount: integer("instruments_count"),
   fundingMethodsJson: text("funding_methods_json"),
+  spreadJson: text("spread_json"),
 });
 
 export const promoSnapshots = sqliteTable("promo_snapshots", {

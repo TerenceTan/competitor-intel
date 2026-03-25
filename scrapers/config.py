@@ -5,6 +5,11 @@ COMPETITORS = [
         "tier": 1,
         "website": "icmarkets.com",
         "pricing_url": "https://www.icmarkets.com/en/trading-accounts/",
+        "account_urls": [
+            "https://www.icmarkets.com/global/en/trading-accounts/overview",  # account types + min deposits + instruments count
+            "https://www.icmarkets.com/global/en/trading-accounts/funding",   # funding/payment methods
+            "https://www.icmarkets.com/global/en/trading-markets/range-of-markets",  # full range of instruments
+        ],
         "promo_url": "https://www.icmarkets.com/en/partnerships/",
         "youtube_query": "IC Markets trading",
         "telegram_handle": None,
@@ -35,6 +40,12 @@ COMPETITORS = [
         "tier": 1,
         "website": "exness.com",
         "pricing_url": "https://www.exness.com/accounts/",
+        "account_urls": [
+            "https://www.exness.com/standard-accounts/",   # Standard + Standard Cent account types
+            "https://www.exness.com/pro-accounts/",        # Pro, Raw Spread, Zero account types
+            "https://www.exness.com/deposits-and-withdrawals/",  # funding/payment methods
+            "https://www.exness.com/forex/",               # instruments overview (200+ instruments)
+        ],
         "promo_url": "https://www.exness.com/promotions/",
         "youtube_query": "Exness trading",
         "telegram_handle": "exness",
@@ -57,6 +68,11 @@ COMPETITORS = [
         "tier": 1,
         "website": "vantagemarkets.com",
         "pricing_url": "https://www.vantagemarkets.com/account-types/",
+        "account_urls": [
+            "https://www.vantagemarkets.com/trading/accounts/",            # account types + min deposits
+            "https://www.vantagemarkets.com/en/deposit-withdrawals-policy/",  # funding/payment methods
+            "https://www.vantagemarkets.com/trading/all-instruments/",     # 1000+ instruments
+        ],
         "promo_url": "https://www.vantagemarkets.com/promotions/",
         "youtube_query": "Vantage Markets trading",
         "telegram_handle": None,
@@ -79,6 +95,11 @@ COMPETITORS = [
         "tier": 1,
         "website": "xm.com",
         "pricing_url": "https://www.xm.com/account-types",
+        "account_urls": [
+            "https://www.xm.com/account-types",        # account types + min deposits
+            "https://www.xm.com/zero-fees",            # funding/payment methods
+            "https://www.xm.com/forex-trading",        # 1000+ instruments across asset classes
+        ],
         "promo_url": "https://www.xm.com/promotions",
         "youtube_query": "XM Group trading forex",
         "telegram_handle": None,
@@ -101,6 +122,11 @@ COMPETITORS = [
         "tier": 1,
         "website": "hfm.com",
         "pricing_url": "https://www.hfm.com/int/en/trading/account-types/",
+        "account_urls": [
+            "https://www.hfm.com/int/en/trading/account-types/",           # account types + min deposits
+            "https://www.hfm.com/int/en/funding/deposit-options",          # funding/payment methods
+            "https://www.hfm.com/int/en/trading-instruments",              # 500+ instruments
+        ],
         "promo_url": "https://www.hfm.com/int/en/about-us/promotions/",
         "youtube_query": "HFM HF Markets trading forex",
         "telegram_handle": None,
@@ -123,6 +149,11 @@ COMPETITORS = [
         "tier": 2,
         "website": "fbs.com",
         "pricing_url": "https://fbs.com/account-types",
+        "account_urls": [
+            "https://fbs.com/account-types",        # account types + min deposits
+            "https://fbs.com/trading/funds",        # 200+ funding/payment methods
+            "https://fbs.com/trading/conditions",   # 550+ instruments + trading conditions
+        ],
         "promo_url": "https://fbs.com/promotions",
         "youtube_query": "FBS trading forex",
         "telegram_handle": None,
@@ -145,6 +176,11 @@ COMPETITORS = [
         "tier": 2,
         "website": "iux.com",
         "pricing_url": "https://iux.com/account-type",
+        "account_urls": [
+            "https://www.iux.com/en/trading-accounts",  # account types comparison (Standard, Pro, Raw)
+            "https://www.iux.com/en/trade/payment",     # 20+ payment/funding methods
+            "https://www.iux.com/en/trade/quotes",      # full instruments list
+        ],
         "promo_url": "https://iux.com/promotions",
         "youtube_query": "IUX Markets trading forex",
         "telegram_handle": None,
@@ -167,6 +203,12 @@ COMPETITORS = [
         "tier": 2,
         "website": "fxpro.com",
         "pricing_url": "https://www.fxpro.com/trading/accounts",
+        "account_urls": [
+            "https://www.fxpro.com/trading/accounts",                              # account types
+            "https://www.fxpro.com/trading-platforms/comparison",                  # platform/account comparison (Raw+, Standard, cTrader)
+            "https://www.fxpro.com/pricing/deposit-methods",                       # funding/payment methods
+            "https://www.fxpro.com/help-section/faq/accounts/what-account-types-do-you-offer",  # account FAQ with details
+        ],
         "promo_url": "https://www.fxpro.com/trading/promotions",
         "youtube_query": "FxPro trading forex",
         "telegram_handle": None,
@@ -189,6 +231,11 @@ COMPETITORS = [
         "tier": 2,
         "website": "mitrade.com",
         "pricing_url": "https://www.mitrade.com/trade",
+        "account_urls": [
+            "https://www.mitrade.com/en/trading-accounts",              # account types (Standard, Pro, Demo)
+            "https://www.mitrade.com/en/support/help-centre/deposit-withdrawal",  # funding/payment methods
+            "https://www.mitrade.com/en/support/contract-specifications",  # 900+ instruments across 5 categories
+        ],
         "promo_url": "https://www.mitrade.com/promotions",
         "youtube_query": "Mitrade trading CFD",
         "telegram_handle": None,
@@ -211,6 +258,11 @@ COMPETITORS = [
         "tier": 2,
         "website": "tmgm.com",
         "pricing_url": "https://www.tmgm.com/en/account-types",
+        "account_urls": [
+            "https://www.tmgm.com/en/trading/account-types",    # account types (Edge, Classic) + min deposits
+            "https://www.tmgm.com/en/deposit-and-withdrawal",   # funding/payment methods
+            "https://www.tmgm.com/en/trading/range-of-markets", # full range of markets/instruments
+        ],
         "promo_url": "https://www.tmgm.com/en/promotions",
         "youtube_query": "TMGM trading forex",
         "telegram_handle": None,
@@ -230,8 +282,8 @@ COMPETITORS = [
 ]
 
 
-DB_PATH = "/home/ubuntu/app/data/competitor-intel.db"
-# DB_PATH = "./data/competitor-intel.db" #for local
+# DB_PATH = "/home/ubuntu/app/data/competitor-intel.db"
+DB_PATH = "./data/competitor-intel.db" #for local
 DELAY_BETWEEN_REQUESTS = 2.5  # seconds
 
 # ---------------------------------------------------------------------------
@@ -245,15 +297,22 @@ PEPPERSTONE_CONFIG = {
     "is_self": True,
     "website": "pepperstone.com",
     "pricing_url": "https://pepperstone.com/en/ways-to-trade/pricing/",
+    "account_urls": [
+        "https://pepperstone.com/en/ways-to-trade/trading-accounts/",              # Razor + Standard account types
+        "https://pepperstone.com/en/ways-to-trade/pricing/",                       # pricing + spreads per account
+        "https://pepperstone.com/en/support/deposits-and-withdrawals/deposit-methods",  # funding/payment methods
+        "https://pepperstone.com/en/markets/",                                     # 1400+ instruments across all asset classes
+    ],
     "promo_url": None,
     "youtube_query": "Pepperstone",
     "telegram_handle": None,
     "pricing_wait_selector": None,
     "wikifx_id": "0361453884",           # fill in from WikiFX if desired
     "myfxbook_slug": "pepperstone",
-    # Known authoritative values used as fallback when scraping cannot extract them
+    # Known authoritative values — always override scraping/AI extraction
     "known_leverage": ["1:200", "1:1000"],     # Retail 1:200, Pro client 1:1000
     "known_account_types": ["Razor", "Standard"],
+    "known_min_deposit_usd": 0.0,              # Pepperstone has no minimum deposit
     "entities": [
         {
             "label": "Pepperstone",

@@ -14,8 +14,8 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from config import DB_PATH as _DB_PATH_RAW
 
-# DB_PATH = os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
-DB_PATH = _DB_PATH_RAW if os.path.isabs(_DB_PATH_RAW) else os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
+DB_PATH = os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
+# DB_PATH = _DB_PATH_RAW if os.path.isabs(_DB_PATH_RAW) else os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
 
 
 def get_db() -> sqlite3.Connection:

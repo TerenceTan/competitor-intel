@@ -32,6 +32,10 @@ export async function middleware(request: NextRequest) {
   const expectedToken = await deriveToken(password);
 
   if (authToken !== expectedToken) {
+    // Return 401 JSON for API routes so programmatic clients get a clear signal
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.redirect(new URL("/login", request.url));
   }
 

@@ -2,10 +2,10 @@
 pricing_scraper.py
 ------------------
 Uses Playwright to scrape pricing / account-type pages for all competitors.
-Extracts:
+Extracts via Claude API:
+  - Account types (list of objects with name, min_deposit, spread_from, max_leverage, currency)
   - Minimum deposit (USD)
   - Leverage ratios (list of strings like "1:500")
-  - Account types (list of strings)
   - Number of instruments/assets
   - Funding methods
 
@@ -27,8 +27,16 @@ from datetime import datetime, timezone
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout  # type: ignore[import]
 
 _SCRAPERS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRAPERS_DIR)
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
+
+# Load .env.local so ANTHROPIC_API_KEY and other secrets are available
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(_PROJECT_ROOT, ".env.local"))
+except ImportError:
+    pass
 
 from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA  # type: ignore[import]
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change  # type: ignore[import]
@@ -37,100 +45,73 @@ from wikifx_scraper import _fetch, _extract_accounts_from_html  # type: ignore[i
 SCRAPER_NAME = "pricing_scraper"
 
 # ---------------------------------------------------------------------------
-# Extraction helpers
+# Claude API extraction
 # ---------------------------------------------------------------------------
 
-def _extract_min_deposit(text: str) -> float | None:
+def _extract_with_claude(combined_text: str, broker_name: str) -> dict:
     """
-    Look for patterns like "$100", "USD 100", "minimum deposit $50",
-    "min deposit: 200", etc. Returns the smallest plausible deposit found.
+    Call Claude API to extract all structured pricing data from page text.
+    Returns dict with accounts, min_deposit_usd, leverage, instruments_count,
+    funding_methods.
     """
-    deposits = []
+    try:
+        import anthropic  # type: ignore[import]
+    except ImportError:
+        print("    [Claude] anthropic package not installed — skipping AI extraction")
+        return {}
 
-    for m in re.finditer(
-        r'(?i)(?:minimum\s+)?deposit[^$\d]{0,30}?(?:usd\s*)?\$?\s*([\d,]+(?:\.\d+)?)',
-        text,
-    ):
-        val = float(m.group(1).replace(",", ""))
-        if 0 < val <= 100_000:
-            deposits.append(val)
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("    [Claude] ANTHROPIC_API_KEY not set — skipping AI extraction")
+        return {}
 
-    for m in re.finditer(r'\$\s*([\d,]+(?:\.\d+)?)', text):
-        val = float(m.group(1).replace(",", ""))
-        if 0 < val <= 10_000:
-            deposits.append(val)
+    client = anthropic.Anthropic(api_key=api_key)
 
-    if not deposits:
-        return None
-    candidates = [d for d in deposits if d >= 0]
-    return min(candidates) if candidates else None
+    prompt = f"""You are extracting structured data from a forex broker's account types and pricing page.
 
+Broker: {broker_name}
 
-def _extract_leverage(text: str) -> list[str]:
-    """Return list of leverage strings like ['1:200', '1:500', '1:1000']."""
-    found = re.findall(r'1\s*:\s*(\d+)', text)
-    seen = set()
-    result = []
-    for f in found:
-        key = f"1:{f}"
-        if key not in seen:
-            seen.add(key)
-            result.append(key)
-    return result
+Page text:
+{combined_text[:15000]}
 
+Return ONLY a valid JSON object with this exact structure:
+{{
+  "accounts": [
+    {{
+      "name": "account type name e.g. Standard, Razor, Raw, ECN",
+      "min_deposit": "raw text e.g. $200 or No minimum or null",
+      "spread_from": "e.g. From 0.0 pips or null",
+      "max_leverage": "e.g. 1:500 or null",
+      "currency": "e.g. USD or null"
+    }}
+  ],
+  "min_deposit_usd": 200.0,
+  "max_leverage": "1:500",
+  "instruments_count": 1000,
+  "funding_methods": ["Visa", "Mastercard", "Bank Transfer"]
+}}
 
-def _extract_account_types(text: str) -> list[str]:
-    """
-    Heuristically extract account type names.
-    Common patterns: "Standard", "Raw", "ECN", "Pro", "VIP", "Islamic", etc.
-    """
-    known = [
-        "Standard", "Standard+", "Raw", "Raw+", "ECN", "ECN+", "Pro", "Elite",
-        "VIP", "Islamic", "Swap-Free", "Swap Free", "Zero", "Ultra Low",
-        "Micro", "Nano", "Mini", "Classic", "Premier", "Advantage", "Advantage+",
-        "Direct", "Sharp", "Cent", "PAMM", "MAM",
-        "Razor", "Razor+",
-    ]
-    found = []
-    for acc in known:
-        if re.search(re.escape(acc), text, re.IGNORECASE):
-            found.append(acc)
-    return found
+Rules:
+- accounts: only include account types clearly described on the page; empty array if none found
+- min_deposit_usd: the lowest numeric USD deposit across all accounts (null if unclear or not mentioned)
+- max_leverage: the highest leverage ratio offered (string like "1:500", null if not found)
+- instruments_count: total number of tradable instruments/assets/pairs (integer, null if not mentioned)
+- funding_methods: list of payment method names found (e.g. Visa, Mastercard, PayPal, Bank Transfer, Bitcoin); empty array if none found
+- Return only JSON, no explanation or markdown"""
 
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
 
-def _extract_instruments_count(text: str) -> int | None:
-    """
-    Look for patterns like "500+ instruments", "1000 assets", "250 trading pairs".
-    Returns the largest plausible count found.
-    """
-    counts = []
-    for m in re.finditer(
-        r'(\d[\d,]*)\s*\+?\s*(?:instruments?|assets?|(?:currency\s+)?pairs?|CFDs?|products?)',
-        text,
-        re.IGNORECASE,
-    ):
-        val = int(m.group(1).replace(",", ""))
-        if 10 <= val <= 50_000:
-            counts.append(val)
-    return max(counts) if counts else None
+    raw = response.content[0].text.strip()
+    # Extract JSON object robustly — handles markdown fences, leading/trailing text
+    json_match = re.search(r'\{[\s\S]*\}', raw)
+    if not json_match:
+        raise ValueError(f"No JSON object found in Claude response: {raw[:200]}")
 
-
-def _extract_funding_methods(text: str) -> list[str]:
-    """Return list of payment method names found in the page."""
-    methods = [
-        "Visa", "Mastercard", "American Express", "Amex",
-        "PayPal", "Skrill", "Neteller", "UnionPay",
-        "Bank Transfer", "Wire Transfer", "BPAY",
-        "Bitcoin", "Crypto", "USDT", "ETH",
-        "Fasapay", "Perfect Money", "WebMoney",
-        "POLi", "Dragonpay", "GrabPay", "Alipay",
-        "WeChat Pay", "Paytm",
-    ]
-    found = []
-    for method in methods:
-        if re.search(re.escape(method), text, re.IGNORECASE):
-            found.append(method)
-    return found
+    return json.loads(json_match.group(0))
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +145,9 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
     """
     Fetch the WikiFX broker page and use its structured account table to:
       - Populate spread_json (always, as it's not captured by direct scraping)
-      - Fill min_deposit_usd if still None after direct scraping
-      - Fill leverage if still empty after direct scraping
+      - Fill account_types if Claude returned nothing
+      - Fill min_deposit_usd if still None after Claude extraction
+      - Fill leverage if still empty after Claude extraction
     """
     wikifx_id = competitor.get("wikifx_id")
     name = competitor["name"]
@@ -199,6 +181,13 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
                     "spread_from": acc["spread_from"],
                 })
         result["spread_json"] = spread_json
+
+        # Fallback: account_types from WikiFX when Claude returned nothing
+        if not result["account_types"]:
+            wikifx_names = [a["name"] for a in accounts if a.get("name")]
+            if wikifx_names:
+                result["account_types"] = wikifx_names
+                print(f"    [WikiFX fallback] account_types filled: {wikifx_names}")
 
         # Fallback: min_deposit from WikiFX accounts (smallest parseable value)
         if result["min_deposit_usd"] is None:
@@ -248,8 +237,8 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 async def scrape_pricing(page, competitor: dict) -> dict:
-    """Scrape the pricing/account page and return extracted fields."""
-    url = competitor["pricing_url"]
+    """Scrape account/pricing pages and return extracted fields via Claude API."""
+    account_urls = competitor.get("account_urls") or [competitor["pricing_url"]]
     result: dict[str, object] = {
         "min_deposit_usd": None,
         "leverage": [],
@@ -259,51 +248,67 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         "spread_json": [],
     }
 
-    try:
-        await page.goto(url, wait_until="networkidle", timeout=45000)
-        await asyncio.sleep(3)
+    combined_text = ""
+    for url in account_urls:
+        try:
+            await page.goto(url, wait_until="networkidle", timeout=45000)
+            await asyncio.sleep(3)
 
-        # Optional per-competitor wait selector for slow-rendering pages
-        wait_selector = competitor.get("pricing_wait_selector")
-        if wait_selector:
-            try:
-                await page.wait_for_selector(wait_selector, timeout=10000)
-            except Exception:
-                pass  # Best-effort; continue with what's loaded
+            # Optional per-competitor wait selector for slow-rendering pages
+            wait_selector = competitor.get("pricing_wait_selector")
+            if wait_selector:
+                try:
+                    await page.wait_for_selector(wait_selector, timeout=10000)
+                except Exception:
+                    pass  # Best-effort; continue with what's loaded
 
-        # Grab all visible text
-        text = await page.inner_text("body")
+            combined_text += "\n\n" + await page.inner_text("body")
+        except PlaywrightTimeout:
+            print(f"    [Pricing] Timeout loading {url}")
+        except Exception as e:
+            print(f"    [Pricing] Error loading {url} for {competitor['name']}: {e}")
 
-        result["min_deposit_usd"] = _extract_min_deposit(text)
-        result["leverage"] = _extract_leverage(text)
-        result["account_types"] = _extract_account_types(text)
-        result["instruments_count"] = _extract_instruments_count(text)
-        result["funding_methods"] = _extract_funding_methods(text)
+    # Claude extraction for all fields
+    if combined_text.strip():
+        try:
+            claude_result = _extract_with_claude(combined_text, competitor["name"])
+            if claude_result:
+                accounts = claude_result.get("accounts") or []
+                result["account_types"] = [a["name"] for a in accounts if a.get("name")]
+                result["min_deposit_usd"] = claude_result.get("min_deposit_usd")
+                result["instruments_count"] = claude_result.get("instruments_count")
+                result["funding_methods"] = claude_result.get("funding_methods") or []
 
-        print(
-            f"    min_deposit={result['min_deposit_usd']} | "
-            f"leverage={result['leverage']} | "
-            f"accounts={result['account_types']} | "
-            f"instruments={result['instruments_count']} | "
-            f"funding={result['funding_methods']}"
-        )
+                # Parse leverage from Claude's string (e.g. "1:500") into list
+                raw_lev = claude_result.get("max_leverage")
+                if raw_lev:
+                    parsed = _parse_leverage_value(str(raw_lev))
+                    if parsed:
+                        result["leverage"] = [parsed]
+        except Exception as e:
+            print(f"    [Claude] Extraction failed for {competitor['name']}: {e}")
 
-    except PlaywrightTimeout:
-        print(f"    [Pricing] Timeout loading {url}")
-    except Exception as e:
-        print(f"    [Pricing] Error for {competitor['name']}: {e}")
+    print(
+        f"    min_deposit={result['min_deposit_usd']} | "
+        f"leverage={result['leverage']} | "
+        f"accounts={result['account_types']} | "
+        f"instruments={result['instruments_count']} | "
+        f"funding={result['funding_methods']}"
+    )
 
-    # Enrich with WikiFX data: adds spread_json, fills min_deposit/leverage gaps
+    # Enrich with WikiFX data: adds spread_json, fills any remaining gaps
     result = _enrich_from_wikifx(competitor, result)
 
-    # Apply known authoritative values from config — always override scraping
-    # so stale or incorrectly extracted data is never persisted.
+    # Apply known authoritative values from config — always override everything
     if competitor.get("known_leverage"):
         result["leverage"] = competitor["known_leverage"]
         print(f"    [config override] leverage: {result['leverage']}")
     if competitor.get("known_account_types"):
         result["account_types"] = competitor["known_account_types"]
         print(f"    [config override] account_types: {result['account_types']}")
+    if competitor.get("known_min_deposit_usd") is not None:
+        result["min_deposit_usd"] = competitor["known_min_deposit_usd"]
+        print(f"    [config override] min_deposit_usd: {result['min_deposit_usd']}")
 
     return result
 
@@ -387,11 +392,17 @@ async def scrape_all():
                         str(data["min_deposit_usd"]), "high"
                     )
                 if data["leverage"]:
-                    max_lev = max(
-                        int(lev.split(":")[1]) for lev in data["leverage"]
-                    ) if data["leverage"] else None
-                    if max_lev:
-                        detect_change(conn, cid, "pricing", "max_leverage", str(max_lev), "high")
+                    try:
+                        lev_vals = [
+                            int(lev.split(":")[1])
+                            for lev in data["leverage"]
+                            if ":" in lev and lev.split(":")[1].isdigit()
+                        ]
+                        max_lev = max(lev_vals) if lev_vals else None
+                        if max_lev:
+                            detect_change(conn, cid, "pricing", "max_leverage", str(max_lev), "high")
+                    except Exception as lev_err:
+                        print(f"    [Change detection] Leverage parse error for {name}: {lev_err}")
                 if data.get("spread_json"):
                     detect_change(conn, cid, "pricing", "spread_json", json.dumps(data["spread_json"]), "medium")
 

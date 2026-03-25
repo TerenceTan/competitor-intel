@@ -4,6 +4,53 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [Unreleased] — 2026-03-25 (Session 8: AI-Powered Pricing Scraper + QA & Security Audit)
+
+### Added
+
+- **Claude API extraction for all pricing fields** — `scrapers/pricing_scraper.py`
+  Replaced all brittle regex helpers (`_extract_account_types`, `_extract_min_deposit`, `_extract_leverage`, `_extract_instruments_count`, `_extract_funding_methods`) with a single `_extract_with_claude()` call using `claude-haiku-4-5-20251001`. Claude extracts account types (with per-account spread, leverage, min deposit, currency), minimum deposit (USD), max leverage, instruments count, and funding methods from combined page text in one pass. Falls back to WikiFX data for any fields Claude could not extract.
+
+- **Multi-URL scraping per broker** — `scrapers/config.py`, `scrapers/pricing_scraper.py`
+  Added `account_urls` list to every broker config (3–4 verified URLs each), covering account types pages, funding/payment pages, and instruments/markets pages. URLs were researched and verified against live broker sites. The scraper now visits all URLs per broker, concatenates the text, and passes it to Claude — giving a much richer picture than scraping a single page.
+
+- **WikiFX fallback for account types** — `scrapers/pricing_scraper.py`
+  Extended `_enrich_from_wikifx()` to also fall back on `account_types` (not just `min_deposit_usd` and `leverage`) when Claude returns an empty list. Priority chain: Claude API → WikiFX → config overrides.
+
+- **`known_min_deposit_usd` config override** — `scrapers/config.py`
+  Added `known_min_deposit_usd` field alongside existing `known_account_types` / `known_leverage`. Set to `0.0` for Pepperstone (no minimum deposit). Always wins over scraped/AI-extracted values.
+
+- **Scraper schedule documentation** — `SCRAPER_SCHEDULE.md`
+  New file documenting the recommended cron schedule for all 7 scrapers: news every 6h, reputation + AI daily, promos every 2 days, pricing + WikiFX + social weekly. Includes ready-to-paste crontab block, environment variable requirements, and estimated run times.
+
+### Fixed
+
+- **`ANTHROPIC_API_KEY` not loaded in pricing scraper** — `scrapers/pricing_scraper.py`
+  Added `python-dotenv` `.env.local` loading (same pattern as `promo_scraper.py` and `ai_analyzer.py`). Previously the scraper always skipped AI extraction when run directly.
+
+- **`IndexError` on malformed leverage strings** — `scrapers/pricing_scraper.py`
+  Change detection block called `int(lev.split(":")[1])` without checking `":"` was present. Added guard: only parses strings matching `":" in lev` with a digit after the colon. Wrapped in explicit try/except so failures are logged rather than silently swallowing the change detection call.
+
+- **Fragile Claude response JSON parsing** — `scrapers/pricing_scraper.py`
+  Replaced `startswith("```")` markdown fence stripping (fails on leading whitespace or trailing text) with `re.search(r'\{[\s\S]*\}')` to extract the JSON object from anywhere in the response.
+
+- **`unsafe-eval` in CSP served to production** — `next.config.js`
+  `unsafe-eval` is required by Turbopack HMR in development but not production. Made it conditional: only appended to `script-src` when `NODE_ENV !== "production"`.
+
+- **Unauthenticated API requests return 302 redirect** — `src/middleware.ts`
+  API routes (`/api/*`) now return `401 { error: "Unauthorized" }` for unauthenticated requests instead of redirecting to `/login`. Page routes still redirect as before.
+
+- **`spreadJson` missing from Drizzle schema** — `src/db/schema.ts`
+  Added `spreadJson: text("spread_json")` to `pricingSnapshots` table definition. The column existed in the DB (added via `ALTER TABLE` migration) but was absent from the ORM schema, causing it to be invisible to Drizzle queries.
+
+- **Sidebar competitor count includes Pepperstone** — `src/app/(dashboard)/layout.tsx`
+  Added `where(eq(competitors.isSelf, 0))` filter to the sidebar competitor count query so Pepperstone is not counted as a competitor in the navigation.
+
+- **DB path resolution broken for local development** — `scrapers/db_utils.py`
+  Simplified path resolution to always use `os.path.join(_PROJECT_ROOT, path.lstrip("./"))`, fixing local runs after `config.py` was switched to the relative `./data/competitor-intel.db` path.
+
+---
+
 ## [Unreleased] — 2026-03-22 (Session 7: QA Audit Fixes)
 
 ### Fixed — Critical
