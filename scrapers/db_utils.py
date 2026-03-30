@@ -40,7 +40,10 @@ def get_db() -> sqlite3.Connection:
         pass  # column already exists
 
     # Additive migration: cross-source leverage validation columns
-    for col in ("leverage_sources_json", "leverage_confidence", "leverage_reconciliation_json"):
+    for col in (
+        "leverage_sources_json", "leverage_confidence", "leverage_reconciliation_json",
+        "min_deposit_sources_json", "min_deposit_confidence", "min_deposit_reconciliation_json",
+    ):
         try:
             conn.execute(f"ALTER TABLE pricing_snapshots ADD COLUMN {col} TEXT")
             conn.commit()

@@ -30,6 +30,9 @@ export const pricingSnapshots = sqliteTable("pricing_snapshots", {
   leverageSourcesJson: text("leverage_sources_json"),
   leverageConfidence: text("leverage_confidence"),
   leverageReconciliationJson: text("leverage_reconciliation_json"),
+  minDepositSourcesJson: text("min_deposit_sources_json"),
+  minDepositConfidence: text("min_deposit_confidence"),
+  minDepositReconciliationJson: text("min_deposit_reconciliation_json"),
 });
 
 export const promoSnapshots = sqliteTable("promo_snapshots", {

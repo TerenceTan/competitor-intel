@@ -190,23 +190,6 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
                 result["account_types"] = wikifx_names
                 print(f"    [WikiFX fallback] account_types filled: {wikifx_names}")
 
-        # Fallback: min_deposit from WikiFX accounts (smallest parseable value)
-        if result["min_deposit_usd"] is None:
-            deposits = []
-            for acc in accounts:
-                raw = acc.get("min_deposit", "")
-                digits = re.sub(r"[^\d.]", "", str(raw))
-                if digits:
-                    try:
-                        val = float(digits)
-                        if 0 < val <= 100_000:
-                            deposits.append(val)
-                    except ValueError:
-                        pass
-            if deposits:
-                result["min_deposit_usd"] = min(deposits)
-                print(f"    [WikiFX fallback] min_deposit filled: {result['min_deposit_usd']}")
-
     return result
 
 
@@ -320,6 +303,236 @@ def _collect_leverage_from_dailyforex(competitor: dict) -> list[str]:
             seen.add(key)
             leverages.append(key)
     return leverages
+
+
+# ---------------------------------------------------------------------------
+# Standalone min-deposit collectors — each returns float | None
+# ---------------------------------------------------------------------------
+
+def _parse_min_deposit(raw: str) -> float | None:
+    """Parse a min deposit string like '$200', 'USD 50', '0', 'No minimum' into a float."""
+    if not raw:
+        return None
+    s = str(raw).lower().strip()
+    if any(kw in s for kw in ("no minimum", "no min", "none", "n/a")):
+        return 0.0
+    digits = re.sub(r"[^\d.]", "", s)
+    if digits:
+        try:
+            val = float(digits)
+            if 0 <= val <= 100_000:
+                return val
+        except ValueError:
+            pass
+    return None
+
+
+def _collect_min_deposit_from_wikifx(competitor: dict) -> float | None:
+    """Extract min deposit from WikiFX broker page account table."""
+    wikifx_id = competitor.get("wikifx_id")
+    if not wikifx_id:
+        return None
+
+    url = f"https://www.wikifx.com/en/dealer/{wikifx_id}.html"
+    try:
+        status, html = _fetch(url)
+    except Exception as e:
+        print(f"    [WikiFX min_deposit] Fetch error for {competitor['name']}: {e}")
+        return None
+
+    if status != 200 or len(html) < 1000:
+        return None
+
+    accounts = _extract_accounts_from_html(html)
+    deposits: list[float] = []
+    for acc in (accounts or []):
+        val = _parse_min_deposit(acc.get("min_deposit", ""))
+        if val is not None:
+            deposits.append(val)
+    return min(deposits) if deposits else None
+
+
+def _collect_min_deposit_from_tradingfinder(competitor: dict) -> float | None:
+    """Extract min deposit from TradingFinder broker review page."""
+    slug = competitor.get("tradingfinder_slug")
+    if not slug:
+        return None
+
+    url = f"https://tradingfinder.com/brokers/{slug}/"
+    try:
+        status, html = _fetch(url)
+    except Exception as e:
+        print(f"    [TradingFinder min_deposit] Fetch error for {competitor['name']}: {e}")
+        return None
+
+    if status != 200 or len(html) < 1000:
+        return None
+
+    # Look for patterns like "Min Deposit: $20", "Minimum Deposit: USD 50"
+    for m in re.finditer(
+        r'(?:min(?:imum)?\s+)?deposit[^<\n]{0,60}',
+        html,
+        re.IGNORECASE,
+    ):
+        val = _parse_min_deposit(m.group(0))
+        if val is not None:
+            return val
+    return None
+
+
+def _collect_min_deposit_from_dailyforex(competitor: dict) -> float | None:
+    """Extract min deposit from DailyForex broker review page."""
+    slug = competitor.get("dailyforex_slug")
+    if not slug:
+        return None
+
+    url = f"https://www.dailyforex.com/forex-brokers/{slug}-review"
+    try:
+        status, html = _fetch(url)
+    except Exception as e:
+        print(f"    [DailyForex min_deposit] Fetch error for {competitor['name']}: {e}")
+        return None
+
+    if status != 200 or len(html) < 1000:
+        return None
+
+    for m in re.finditer(
+        r'(?:min(?:imum)?\s+)?deposit[^<\n]{0,60}',
+        html,
+        re.IGNORECASE,
+    ):
+        val = _parse_min_deposit(m.group(0))
+        if val is not None:
+            return val
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Min-deposit reconciliation
+# ---------------------------------------------------------------------------
+
+def _reconcile_min_deposit(
+    sources: dict[str, float | None], broker_name: str
+) -> tuple[float | None, str, dict]:
+    """
+    Compare min deposit values from multiple sources and reconcile.
+    Returns (final_value, confidence, reconciliation_info).
+    """
+    non_empty = {k: v for k, v in sources.items() if v is not None}
+
+    if not non_empty:
+        return None, "low", {"method": "no_data"}
+
+    source_names = list(non_empty.keys())
+    source_values = list(non_empty.values())
+
+    if len(non_empty) == 1:
+        src = source_names[0]
+        return source_values[0], "low", {"method": "single_source", "source": src}
+
+    # All agree (exact match)
+    unique_vals = set(source_values)
+    if len(unique_vals) == 1:
+        return source_values[0], "high", {
+            "method": "auto_agree",
+            "agreed_value": source_values[0],
+            "sources": source_names,
+        }
+
+    # Close enough — within $10 tolerance (brokers often show $0 vs $1, or $50 vs $45)
+    min_val = min(source_values)
+    max_val = max(source_values)
+    if max_val - min_val <= 10:
+        # Use the lowest (most conservative/favorable) value
+        return min_val, "high", {
+            "method": "auto_agree_within_tolerance",
+            "chosen_value": min_val,
+            "range": [min_val, max_val],
+            "sources": source_names,
+        }
+
+    # Majority agree (3+ sources)
+    if len(non_empty) >= 3:
+        from collections import Counter
+        counts = Counter(source_values)
+        most_common_val, most_common_count = counts.most_common(1)[0]
+        if most_common_count >= 2 and most_common_count > len(non_empty) / 2:
+            majority_sources = [s for s, v in non_empty.items() if v == most_common_val]
+            outliers = {s: v for s, v in non_empty.items() if v != most_common_val}
+            return most_common_val, "medium", {
+                "method": "majority_agree",
+                "agreed_value": most_common_val,
+                "majority_sources": majority_sources,
+                "outliers": outliers,
+            }
+
+    # Genuine disagreement — call Claude
+    print(f"    [Min deposit reconciliation] Sources disagree for {broker_name}: {non_empty} — calling Claude")
+    try:
+        import anthropic  # type: ignore[import]
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            for preferred in ("claude", "wikifx", "tradingfinder", "dailyforex"):
+                if preferred in non_empty:
+                    return non_empty[preferred], "low", {
+                        "method": "fallback_no_api_key",
+                        "source": preferred,
+                        "disagreement": non_empty,
+                    }
+
+        client = anthropic.Anthropic(api_key=api_key)
+        source_lines = "\n".join(
+            f"- {src}: ${val}" for src, val in non_empty.items()
+        )
+        prompt = f"""You are validating minimum deposit data for the forex broker "{broker_name}".
+Multiple sources report different minimum deposit amounts (USD):
+
+{source_lines}
+
+Which minimum deposit value is most likely correct? Consider:
+1. "claude" source (official broker website) is most authoritative when available
+2. "wikifx" is a regulated broker database and generally reliable
+3. "tradingfinder" and "dailyforex" are review sites that may have outdated info
+4. $0 means "no minimum deposit" — this is a real value, not missing data
+
+Return ONLY a JSON object:
+{{
+  "min_deposit_usd": NNN.0,
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "brief explanation (1-2 sentences)"
+}}"""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        json_match = re.search(r'\{[\s\S]*\}', raw)
+        if json_match:
+            reconciled = json.loads(json_match.group(0))
+            final_val = reconciled.get("min_deposit_usd")
+            confidence = reconciled.get("confidence", "medium")
+            if final_val is not None:
+                print(f"    [Min deposit reconciliation] Claude chose ${final_val} ({confidence}): {reconciled.get('reasoning', '')}")
+                return float(final_val), confidence, {
+                    "method": "claude_reconciled",
+                    "reasoning": reconciled.get("reasoning", ""),
+                    "disagreement": non_empty,
+                }
+    except Exception as e:
+        print(f"    [Min deposit reconciliation] Claude call failed for {broker_name}: {e}")
+
+    # Final fallback: prefer official site, then WikiFX
+    for preferred in ("claude", "wikifx", "tradingfinder", "dailyforex"):
+        if preferred in non_empty:
+            return non_empty[preferred], "low", {
+                "method": "fallback_reconciliation_failed",
+                "source": preferred,
+                "disagreement": non_empty,
+            }
+
+    return None, "low", {"method": "no_data"}
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +695,7 @@ async def scrape_pricing(page, competitor: dict) -> dict:
     account_urls = competitor.get("account_urls") or [competitor["pricing_url"]]
     name = competitor["name"]
     result: dict[str, object] = {
-        "min_deposit_usd": competitor.get("known_min_deposit_usd"),
+        "min_deposit_usd": None,
         "leverage": [],
         "account_types": competitor.get("known_account_types", []),
         "instruments_count": None,
@@ -491,13 +704,14 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         "leverage_sources": {},
         "leverage_confidence": None,
         "leverage_reconciliation": {},
+        "min_deposit_sources": {},
+        "min_deposit_confidence": None,
+        "min_deposit_reconciliation": {},
     }
 
     # Log config overrides applied up front
     if competitor.get("known_account_types"):
         print(f"    [config override] account_types: {result['account_types']}")
-    if competitor.get("known_min_deposit_usd") is not None:
-        print(f"    [config override] min_deposit_usd: {result['min_deposit_usd']}")
 
     # If known_leverage is set, skip all leverage scraping entirely
     if competitor.get("known_leverage"):
@@ -506,6 +720,14 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         result["leverage_confidence"] = "high"
         result["leverage_reconciliation"] = {"method": "config_override"}
         print(f"    [config override] leverage: {result['leverage']}")
+
+    # If known_min_deposit_usd is set, skip all min deposit scraping entirely
+    if competitor.get("known_min_deposit_usd") is not None:
+        result["min_deposit_usd"] = competitor["known_min_deposit_usd"]
+        result["min_deposit_sources"] = {"config_override": competitor["known_min_deposit_usd"]}
+        result["min_deposit_confidence"] = "high"
+        result["min_deposit_reconciliation"] = {"method": "config_override"}
+        print(f"    [config override] min_deposit_usd: {result['min_deposit_usd']}")
 
     combined_text = ""
     for url in account_urls:
@@ -527,7 +749,7 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         except Exception as e:
             print(f"    [Pricing] Error loading {url} for {name}: {e}")
 
-    # Claude extraction for non-leverage fields
+    # Claude extraction for non-leverage/non-deposit fields (+ raw result for cross-source)
     claude_result: dict = {}
     if combined_text.strip():
         try:
@@ -536,8 +758,6 @@ async def scrape_pricing(page, competitor: dict) -> dict:
                 accounts = claude_result.get("accounts") or []
                 if not result["account_types"]:
                     result["account_types"] = [a["name"] for a in accounts if a.get("name")]
-                if result["min_deposit_usd"] is None:
-                    result["min_deposit_usd"] = claude_result.get("min_deposit_usd")
                 result["instruments_count"] = claude_result.get("instruments_count")
                 result["funding_methods"] = claude_result.get("funding_methods") or []
         except Exception as e:
@@ -584,6 +804,40 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         result["leverage_confidence"] = confidence
         result["leverage_reconciliation"] = reconciliation
         print(f"    [Leverage] Final: {final_leverage} (confidence: {confidence}, method: {reconciliation.get('method')})")
+
+    # Cross-source min deposit collection and reconciliation (skip if config override)
+    if competitor.get("known_min_deposit_usd") is None:
+        print(f"    [Min deposit] Collecting from all sources for {name}...")
+
+        # Source 1: Claude (already extracted above)
+        claude_min_dep = claude_result.get("min_deposit_usd") if claude_result else None
+
+        # Source 2: WikiFX
+        time.sleep(1)
+        wikifx_min_dep = _collect_min_deposit_from_wikifx(competitor)
+
+        # Source 3: TradingFinder
+        time.sleep(1)
+        tf_min_dep = _collect_min_deposit_from_tradingfinder(competitor)
+
+        # Source 4: DailyForex
+        time.sleep(1)
+        df_min_dep = _collect_min_deposit_from_dailyforex(competitor)
+
+        dep_sources = {
+            "claude": claude_min_dep,
+            "wikifx": wikifx_min_dep,
+            "tradingfinder": tf_min_dep,
+            "dailyforex": df_min_dep,
+        }
+        print(f"    [Min deposit] Sources: {dep_sources}")
+
+        final_deposit, dep_confidence, dep_reconciliation = _reconcile_min_deposit(dep_sources, name)
+        result["min_deposit_usd"] = final_deposit
+        result["min_deposit_sources"] = dep_sources
+        result["min_deposit_confidence"] = dep_confidence
+        result["min_deposit_reconciliation"] = dep_reconciliation
+        print(f"    [Min deposit] Final: ${final_deposit} (confidence: {dep_confidence}, method: {dep_reconciliation.get('method')})")
 
     print(
         f"    min_deposit={result['min_deposit_usd']} | "
@@ -645,6 +899,9 @@ async def scrape_all():
                 leverage_sources_json = json.dumps(data.get("leverage_sources", {}))
                 leverage_confidence = data.get("leverage_confidence")
                 leverage_reconciliation_json = json.dumps(data.get("leverage_reconciliation", {}))
+                min_deposit_sources_json = json.dumps(data.get("min_deposit_sources", {}))
+                min_deposit_confidence = data.get("min_deposit_confidence")
+                min_deposit_reconciliation_json = json.dumps(data.get("min_deposit_reconciliation", {}))
 
                 conn.execute(
                     "DELETE FROM pricing_snapshots WHERE competitor_id=? AND snapshot_date=?",
@@ -655,8 +912,9 @@ async def scrape_all():
                     INSERT INTO pricing_snapshots
                         (competitor_id, snapshot_date, leverage_json, account_types_json,
                          min_deposit_usd, instruments_count, funding_methods_json, spread_json,
-                         leverage_sources_json, leverage_confidence, leverage_reconciliation_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         leverage_sources_json, leverage_confidence, leverage_reconciliation_json,
+                         min_deposit_sources_json, min_deposit_confidence, min_deposit_reconciliation_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         cid,
@@ -670,6 +928,9 @@ async def scrape_all():
                         leverage_sources_json,
                         leverage_confidence,
                         leverage_reconciliation_json,
+                        min_deposit_sources_json,
+                        min_deposit_confidence,
+                        min_deposit_reconciliation_json,
                     ),
                 )
                 conn.commit()
