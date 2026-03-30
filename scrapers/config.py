@@ -15,6 +15,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "9641842942",
+        "tradingfinder_slug": "ic-markets",
+        "dailyforex_slug": "ic-markets",
         "myfxbook_slug": "ic-markets",
         "entities": [
             {
@@ -51,6 +53,8 @@ COMPETITORS = [
         "telegram_handle": "exness",
         "pricing_wait_selector": None,
         "wikifx_id": "0001390005",
+        "tradingfinder_slug": "exness",
+        "dailyforex_slug": "exness",
         "myfxbook_slug": "exness",
         "entities": [
             {
@@ -78,6 +82,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "0361345333",
+        "tradingfinder_slug": "vantage",
+        "dailyforex_slug": "vantage-fx",
         "myfxbook_slug": "vantage-markets",
         "entities": [
             {
@@ -105,6 +111,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "0001461138",
+        "tradingfinder_slug": "xm",
+        "dailyforex_slug": "xm",
         "myfxbook_slug": "xm-group",
         "entities": [
             {
@@ -132,6 +140,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "7391713958",
+        "tradingfinder_slug": "hfm",
+        "dailyforex_slug": "hotforex",
         "myfxbook_slug": "hf-markets",
         "entities": [
             {
@@ -159,6 +169,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "3981687359",
+        "tradingfinder_slug": "fbs",
+        "dailyforex_slug": "fbs",
         "myfxbook_slug": "fbs",
         "entities": [
             {
@@ -186,6 +198,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "2369722629",
+        "tradingfinder_slug": "iux",
+        "dailyforex_slug": "iux",
         "myfxbook_slug": "iux",
         "entities": [
             {
@@ -214,6 +228,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "0001892535",
+        "tradingfinder_slug": "fxpro",
+        "dailyforex_slug": "fxpro",
         "myfxbook_slug": "fxpro",
         "entities": [
             {
@@ -241,6 +257,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "4001424292",
+        "tradingfinder_slug": "mitrade",
+        "dailyforex_slug": "mitrade",
         "myfxbook_slug": None,
         "entities": [
             {
@@ -268,6 +286,8 @@ COMPETITORS = [
         "telegram_handle": None,
         "pricing_wait_selector": None,
         "wikifx_id": "7101709423",
+        "tradingfinder_slug": "tmgm",
+        "dailyforex_slug": "tmgm",
         "myfxbook_slug": "tmgm",
         "entities": [
             {
@@ -308,6 +328,8 @@ PEPPERSTONE_CONFIG = {
     "telegram_handle": None,
     "pricing_wait_selector": None,
     "wikifx_id": "0361453884",           # fill in from WikiFX if desired
+    "tradingfinder_slug": "pepperstone",
+    "dailyforex_slug": "pepperstone",
     "myfxbook_slug": "pepperstone",
     # Known authoritative values — always override scraping/AI extraction
     "known_leverage": ["1:200", "1:1000"],     # Retail 1:200, Pro client 1:1000

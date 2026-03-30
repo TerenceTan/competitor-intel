@@ -232,6 +232,96 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
     return result
 
 
+def _enrich_from_tradingfinder(competitor: dict, result: dict) -> dict:
+    """
+    Fetch the TradingFinder broker review page and scan for leverage mentions.
+    Only fills leverage if still empty after prior extraction steps.
+    URL pattern: https://tradingfinder.com/brokers/{slug}/
+    """
+    slug = competitor.get("tradingfinder_slug")
+    name = competitor["name"]
+    if not slug or result.get("leverage"):
+        return result
+
+    url = f"https://tradingfinder.com/brokers/{slug}/"
+    try:
+        status, html = _fetch(url)
+    except Exception as e:
+        print(f"    [TradingFinder fallback] Fetch error for {name}: {e}")
+        return result
+
+    if status != 200 or len(html) < 1000:
+        print(f"    [TradingFinder fallback] HTTP {status} or empty page for {name}")
+        return result
+
+    leverages: list[str] = []
+    seen: set[str] = set()
+
+    # Look for "Maximum Leverage: 1:NNN" or similar structured mentions
+    for m in re.finditer(
+        r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}',
+        html,
+        re.IGNORECASE,
+    ):
+        key = _parse_leverage_value(m.group(0))
+        if key and key not in seen:
+            seen.add(key)
+            leverages.append(key)
+
+    if leverages:
+        result["leverage"] = leverages
+        print(f"    [TradingFinder fallback] leverage filled: {leverages}")
+    else:
+        print(f"    [TradingFinder fallback] leverage not found for {name}")
+
+    return result
+
+
+def _enrich_from_dailyforex(competitor: dict, result: dict) -> dict:
+    """
+    Fetch the DailyForex broker review page and scan for leverage mentions.
+    Only fills leverage if still empty after prior extraction steps.
+    URL pattern: https://www.dailyforex.com/forex-brokers/{slug}-review
+    """
+    slug = competitor.get("dailyforex_slug")
+    name = competitor["name"]
+    if not slug or result.get("leverage"):
+        return result
+
+    url = f"https://www.dailyforex.com/forex-brokers/{slug}-review"
+    try:
+        status, html = _fetch(url)
+    except Exception as e:
+        print(f"    [DailyForex fallback] Fetch error for {name}: {e}")
+        return result
+
+    if status != 200 or len(html) < 1000:
+        print(f"    [DailyForex fallback] HTTP {status} or empty page for {name}")
+        return result
+
+    leverages: list[str] = []
+    seen: set[str] = set()
+
+    # Scan for leverage ratio patterns in page content
+    for m in re.finditer(
+        r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}',
+        html,
+        re.IGNORECASE,
+    ):
+        key = _parse_leverage_value(m.group(0))
+        if key and key not in seen:
+            seen.add(key)
+            leverages.append(key)
+
+    if leverages:
+        result["leverage"] = leverages
+        print(f"    [DailyForex fallback] leverage filled: {leverages}")
+    else:
+        print(f"    [DailyForex fallback] leverage not found for {name}")
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Main scraper
 # ---------------------------------------------------------------------------
@@ -240,13 +330,21 @@ async def scrape_pricing(page, competitor: dict) -> dict:
     """Scrape account/pricing pages and return extracted fields via Claude API."""
     account_urls = competitor.get("account_urls") or [competitor["pricing_url"]]
     result: dict[str, object] = {
-        "min_deposit_usd": None,
-        "leverage": [],
-        "account_types": [],
+        "min_deposit_usd": competitor.get("known_min_deposit_usd"),
+        "leverage": competitor.get("known_leverage", []),
+        "account_types": competitor.get("known_account_types", []),
         "instruments_count": None,
         "funding_methods": [],
         "spread_json": [],
     }
+
+    # Log config overrides applied up front
+    if competitor.get("known_leverage"):
+        print(f"    [config override] leverage: {result['leverage']}")
+    if competitor.get("known_account_types"):
+        print(f"    [config override] account_types: {result['account_types']}")
+    if competitor.get("known_min_deposit_usd") is not None:
+        print(f"    [config override] min_deposit_usd: {result['min_deposit_usd']}")
 
     combined_text = ""
     for url in account_urls:
@@ -274,17 +372,20 @@ async def scrape_pricing(page, competitor: dict) -> dict:
             claude_result = _extract_with_claude(combined_text, competitor["name"])
             if claude_result:
                 accounts = claude_result.get("accounts") or []
-                result["account_types"] = [a["name"] for a in accounts if a.get("name")]
-                result["min_deposit_usd"] = claude_result.get("min_deposit_usd")
+                if not result["account_types"]:
+                    result["account_types"] = [a["name"] for a in accounts if a.get("name")]
+                if result["min_deposit_usd"] is None:
+                    result["min_deposit_usd"] = claude_result.get("min_deposit_usd")
                 result["instruments_count"] = claude_result.get("instruments_count")
                 result["funding_methods"] = claude_result.get("funding_methods") or []
 
                 # Parse leverage from Claude's string (e.g. "1:500") into list
-                raw_lev = claude_result.get("max_leverage")
-                if raw_lev:
-                    parsed = _parse_leverage_value(str(raw_lev))
-                    if parsed:
-                        result["leverage"] = [parsed]
+                if not result["leverage"]:
+                    raw_lev = claude_result.get("max_leverage")
+                    if raw_lev:
+                        parsed = _parse_leverage_value(str(raw_lev))
+                        if parsed:
+                            result["leverage"] = [parsed]
         except Exception as e:
             print(f"    [Claude] Extraction failed for {competitor['name']}: {e}")
 
@@ -299,16 +400,9 @@ async def scrape_pricing(page, competitor: dict) -> dict:
     # Enrich with WikiFX data: adds spread_json, fills any remaining gaps
     result = _enrich_from_wikifx(competitor, result)
 
-    # Apply known authoritative values from config — always override everything
-    if competitor.get("known_leverage"):
-        result["leverage"] = competitor["known_leverage"]
-        print(f"    [config override] leverage: {result['leverage']}")
-    if competitor.get("known_account_types"):
-        result["account_types"] = competitor["known_account_types"]
-        print(f"    [config override] account_types: {result['account_types']}")
-    if competitor.get("known_min_deposit_usd") is not None:
-        result["min_deposit_usd"] = competitor["known_min_deposit_usd"]
-        print(f"    [config override] min_deposit_usd: {result['min_deposit_usd']}")
+    # Additional fallbacks for leverage: TradingFinder, then DailyForex
+    result = _enrich_from_tradingfinder(competitor, result)
+    result = _enrich_from_dailyforex(competitor, result)
 
     return result
 
