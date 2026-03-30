@@ -27,6 +27,9 @@ export const pricingSnapshots = sqliteTable("pricing_snapshots", {
   instrumentsCount: integer("instruments_count"),
   fundingMethodsJson: text("funding_methods_json"),
   spreadJson: text("spread_json"),
+  leverageSourcesJson: text("leverage_sources_json"),
+  leverageConfidence: text("leverage_confidence"),
+  leverageReconciliationJson: text("leverage_reconciliation_json"),
 });
 
 export const promoSnapshots = sqliteTable("promo_snapshots", {

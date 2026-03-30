@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout  # type: ignore[import]
@@ -147,7 +148,7 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
       - Populate spread_json (always, as it's not captured by direct scraping)
       - Fill account_types if Claude returned nothing
       - Fill min_deposit_usd if still None after Claude extraction
-      - Fill leverage if still empty after Claude extraction
+    Note: leverage is now handled separately by _collect_leverage_from_wikifx.
     """
     wikifx_id = competitor.get("wikifx_id")
     name = competitor["name"]
@@ -160,16 +161,16 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
         html: str
         status, html = _fetch(url)
     except Exception as e:
-        print(f"    [WikiFX fallback] Fetch error for {name}: {e}")
+        print(f"    [WikiFX] Fetch error for {name}: {e}")
         return result
 
     if status != 200 or len(html) < 1000:
-        print(f"    [WikiFX fallback] HTTP {status} or empty page for {name}")
+        print(f"    [WikiFX] HTTP {status} or empty page for {name}")
         return result
 
     accounts = _extract_accounts_from_html(html)
     if not accounts:
-        print(f"    [WikiFX fallback] No accounts extracted for {name} — trying text scan")
+        print(f"    [WikiFX] No accounts extracted for {name}")
 
     # Build spread_json from account table rows
     if accounts:
@@ -206,120 +207,270 @@ def _enrich_from_wikifx(competitor: dict, result: dict) -> dict:
                 result["min_deposit_usd"] = min(deposits)
                 print(f"    [WikiFX fallback] min_deposit filled: {result['min_deposit_usd']}")
 
-    # Fallback: leverage — first try account table, then full page text scan
-    if not result["leverage"]:
-        leverages = []
-        seen: set[str] = set()
-        for acc in accounts:
-            raw = str(acc.get("max_leverage", ""))
-            key = _parse_leverage_value(raw)
-            if key and key not in seen:
-                seen.add(key)
-                leverages.append(key)
-        # Scan the raw HTML for any leverage mentions (catches non-table layouts)
-        if not leverages:
-            for m in re.finditer(r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}', html, re.IGNORECASE):
-                key = _parse_leverage_value(m.group(0))
-                if key and key not in seen:
-                    seen.add(key)
-                    leverages.append(key)
-        if leverages:
-            result["leverage"] = leverages
-            print(f"    [WikiFX fallback] leverage filled: {leverages}")
-        else:
-            print(f"    [WikiFX fallback] leverage not found for {name}")
-
     return result
 
 
-def _enrich_from_tradingfinder(competitor: dict, result: dict) -> dict:
-    """
-    Fetch the TradingFinder broker review page and scan for leverage mentions.
-    Only fills leverage if still empty after prior extraction steps.
-    URL pattern: https://tradingfinder.com/brokers/{slug}/
-    """
-    slug = competitor.get("tradingfinder_slug")
+# ---------------------------------------------------------------------------
+# Standalone leverage collectors — each returns list[str] without side effects
+# ---------------------------------------------------------------------------
+
+def _collect_leverage_from_claude(combined_text: str, broker_name: str) -> list[str]:
+    """Extract leverage from official broker page text via Claude AI."""
+    if not combined_text.strip():
+        return []
+    try:
+        claude_result = _extract_with_claude(combined_text, broker_name)
+        if claude_result:
+            raw_lev = claude_result.get("max_leverage")
+            if raw_lev:
+                parsed = _parse_leverage_value(str(raw_lev))
+                if parsed:
+                    return [parsed]
+    except Exception as e:
+        print(f"    [Claude leverage] Extraction failed for {broker_name}: {e}")
+    return []
+
+
+def _collect_leverage_from_wikifx(competitor: dict) -> list[str]:
+    """Extract leverage from WikiFX broker page (account table + text scan)."""
+    wikifx_id = competitor.get("wikifx_id")
     name = competitor["name"]
-    if not slug or result.get("leverage"):
-        return result
+    if not wikifx_id:
+        return []
+
+    url = f"https://www.wikifx.com/en/dealer/{wikifx_id}.html"
+    try:
+        status, html = _fetch(url)
+    except Exception as e:
+        print(f"    [WikiFX leverage] Fetch error for {name}: {e}")
+        return []
+
+    if status != 200 or len(html) < 1000:
+        return []
+
+    leverages: list[str] = []
+    seen: set[str] = set()
+
+    accounts = _extract_accounts_from_html(html)
+    for acc in (accounts or []):
+        raw = str(acc.get("max_leverage", ""))
+        key = _parse_leverage_value(raw)
+        if key and key not in seen:
+            seen.add(key)
+            leverages.append(key)
+
+    # Scan raw HTML for leverage mentions (catches non-table layouts)
+    if not leverages:
+        for m in re.finditer(r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}', html, re.IGNORECASE):
+            key = _parse_leverage_value(m.group(0))
+            if key and key not in seen:
+                seen.add(key)
+                leverages.append(key)
+
+    return leverages
+
+
+def _collect_leverage_from_tradingfinder(competitor: dict) -> list[str]:
+    """Extract leverage from TradingFinder broker review page."""
+    slug = competitor.get("tradingfinder_slug")
+    if not slug:
+        return []
 
     url = f"https://tradingfinder.com/brokers/{slug}/"
     try:
         status, html = _fetch(url)
     except Exception as e:
-        print(f"    [TradingFinder fallback] Fetch error for {name}: {e}")
-        return result
+        print(f"    [TradingFinder leverage] Fetch error for {competitor['name']}: {e}")
+        return []
 
     if status != 200 or len(html) < 1000:
-        print(f"    [TradingFinder fallback] HTTP {status} or empty page for {name}")
-        return result
+        return []
 
     leverages: list[str] = []
     seen: set[str] = set()
-
-    # Look for "Maximum Leverage: 1:NNN" or similar structured mentions
-    for m in re.finditer(
-        r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}',
-        html,
-        re.IGNORECASE,
-    ):
+    for m in re.finditer(r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}', html, re.IGNORECASE):
         key = _parse_leverage_value(m.group(0))
         if key and key not in seen:
             seen.add(key)
             leverages.append(key)
-
-    if leverages:
-        result["leverage"] = leverages
-        print(f"    [TradingFinder fallback] leverage filled: {leverages}")
-    else:
-        print(f"    [TradingFinder fallback] leverage not found for {name}")
-
-    return result
+    return leverages
 
 
-def _enrich_from_dailyforex(competitor: dict, result: dict) -> dict:
-    """
-    Fetch the DailyForex broker review page and scan for leverage mentions.
-    Only fills leverage if still empty after prior extraction steps.
-    URL pattern: https://www.dailyforex.com/forex-brokers/{slug}-review
-    """
+def _collect_leverage_from_dailyforex(competitor: dict) -> list[str]:
+    """Extract leverage from DailyForex broker review page."""
     slug = competitor.get("dailyforex_slug")
-    name = competitor["name"]
-    if not slug or result.get("leverage"):
-        return result
+    if not slug:
+        return []
 
     url = f"https://www.dailyforex.com/forex-brokers/{slug}-review"
     try:
         status, html = _fetch(url)
     except Exception as e:
-        print(f"    [DailyForex fallback] Fetch error for {name}: {e}")
-        return result
+        print(f"    [DailyForex leverage] Fetch error for {competitor['name']}: {e}")
+        return []
 
     if status != 200 or len(html) < 1000:
-        print(f"    [DailyForex fallback] HTTP {status} or empty page for {name}")
-        return result
+        return []
 
     leverages: list[str] = []
     seen: set[str] = set()
-
-    # Scan for leverage ratio patterns in page content
-    for m in re.finditer(
-        r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}',
-        html,
-        re.IGNORECASE,
-    ):
+    for m in re.finditer(r'(?:max(?:imum)?\s+)?leverage[^<\n]{0,80}', html, re.IGNORECASE):
         key = _parse_leverage_value(m.group(0))
         if key and key not in seen:
             seen.add(key)
             leverages.append(key)
+    return leverages
 
-    if leverages:
-        result["leverage"] = leverages
-        print(f"    [DailyForex fallback] leverage filled: {leverages}")
-    else:
-        print(f"    [DailyForex fallback] leverage not found for {name}")
 
-    return result
+# ---------------------------------------------------------------------------
+# Leverage reconciliation
+# ---------------------------------------------------------------------------
+
+def _max_leverage_int(values: list[str]) -> int | None:
+    """Extract the highest leverage integer from a list like ['1:200', '1:500']."""
+    nums = []
+    for v in values:
+        if ":" in v:
+            try:
+                nums.append(int(v.split(":")[1]))
+            except (ValueError, IndexError):
+                pass
+    return max(nums) if nums else None
+
+
+def _reconcile_leverage(sources: dict[str, list[str]], broker_name: str) -> tuple[list[str], str, dict]:
+    """
+    Compare leverage values from multiple sources and reconcile.
+    Returns (final_leverage_list, confidence, reconciliation_info).
+
+    Logic:
+    1. No data → low confidence
+    2. Single source → low confidence
+    3. All sources agree → high confidence (no Claude call)
+    4. Majority agree → medium confidence (no Claude call)
+    5. Genuine disagreement → call Claude Haiku to reconcile
+    """
+    non_empty = {k: v for k, v in sources.items() if v}
+
+    if not non_empty:
+        return [], "low", {"method": "no_data"}
+
+    source_names = list(non_empty.keys())
+    source_values = list(non_empty.values())
+
+    if len(non_empty) == 1:
+        src = source_names[0]
+        return source_values[0], "low", {"method": "single_source", "source": src}
+
+    # Compare max leverage integers across sources
+    max_per_source: dict[str, int] = {}
+    for src, vals in non_empty.items():
+        mx = _max_leverage_int(vals)
+        if mx is not None:
+            max_per_source[src] = mx
+
+    if not max_per_source:
+        # All sources had values but none parseable
+        first_vals = source_values[0]
+        return first_vals, "low", {"method": "unparseable", "sources": source_names}
+
+    unique_maxes = set(max_per_source.values())
+
+    # All agree
+    if len(unique_maxes) == 1:
+        agreed_val = unique_maxes.pop()
+        # Use the richest value list (most entries) from any agreeing source
+        best_vals = max(source_values, key=len)
+        return best_vals, "high", {
+            "method": "auto_agree",
+            "agreed_value": f"1:{agreed_val}",
+            "sources": source_names,
+        }
+
+    # Majority agree (3+ sources provided data)
+    if len(max_per_source) >= 3:
+        from collections import Counter
+        counts = Counter(max_per_source.values())
+        most_common_val, most_common_count = counts.most_common(1)[0]
+        if most_common_count >= 2 and most_common_count > len(max_per_source) / 2:
+            majority_sources = [s for s, v in max_per_source.items() if v == most_common_val]
+            outlier_sources = {s: f"1:{v}" for s, v in max_per_source.items() if v != most_common_val}
+            # Use values from a majority source
+            best_vals = non_empty[majority_sources[0]]
+            return best_vals, "medium", {
+                "method": "majority_agree",
+                "agreed_value": f"1:{most_common_val}",
+                "majority_sources": majority_sources,
+                "outliers": outlier_sources,
+            }
+
+    # Genuine disagreement — call Claude to reconcile
+    print(f"    [Reconciliation] Sources disagree for {broker_name}: {max_per_source} — calling Claude")
+    try:
+        import anthropic  # type: ignore[import]
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            # Can't call Claude — fall back to official site or highest-authority source
+            for preferred in ("claude", "wikifx", "tradingfinder", "dailyforex"):
+                if preferred in non_empty:
+                    return non_empty[preferred], "low", {
+                        "method": "fallback_no_api_key",
+                        "source": preferred,
+                        "disagreement": {s: f"1:{v}" for s, v in max_per_source.items()},
+                    }
+
+        client = anthropic.Anthropic(api_key=api_key)
+        source_lines = "\n".join(
+            f"- {src}: {vals}" for src, vals in non_empty.items()
+        )
+        prompt = f"""You are validating leverage data for the forex broker "{broker_name}".
+Multiple sources report different maximum leverage values:
+
+{source_lines}
+
+Which maximum leverage value is most likely correct? Consider:
+1. "claude" source (official broker website) is most authoritative when available
+2. "wikifx" is a regulated broker database and generally reliable
+3. "tradingfinder" and "dailyforex" are review sites that may have outdated info
+4. Differences may reflect different jurisdictions (e.g., EU 1:30 vs global 1:500) — prefer the global/international max
+
+Return ONLY a JSON object:
+{{
+  "max_leverage": "1:NNN",
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "brief explanation (1-2 sentences)"
+}}"""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        json_match = re.search(r'\{[\s\S]*\}', raw)
+        if json_match:
+            reconciled = json.loads(json_match.group(0))
+            final_lev = reconciled.get("max_leverage")
+            parsed = _parse_leverage_value(str(final_lev)) if final_lev else None
+            confidence = reconciled.get("confidence", "medium")
+            if parsed:
+                print(f"    [Reconciliation] Claude chose {parsed} ({confidence}): {reconciled.get('reasoning', '')}")
+                return [parsed], confidence, {
+                    "method": "claude_reconciled",
+                    "reasoning": reconciled.get("reasoning", ""),
+                    "disagreement": {s: f"1:{v}" for s, v in max_per_source.items()},
+                }
+    except Exception as e:
+        print(f"    [Reconciliation] Claude call failed for {broker_name}: {e}")
+
+    # Final fallback: prefer official site, then WikiFX, then others
+    for preferred in ("claude", "wikifx", "tradingfinder", "dailyforex"):
+        if preferred in non_empty:
+            return non_empty[preferred], "low", {
+                "method": "fallback_reconciliation_failed",
+                "source": preferred,
+                "disagreement": {s: f"1:{v}" for s, v in max_per_source.items()},
+            }
 
 
 # ---------------------------------------------------------------------------
@@ -329,22 +480,32 @@ def _enrich_from_dailyforex(competitor: dict, result: dict) -> dict:
 async def scrape_pricing(page, competitor: dict) -> dict:
     """Scrape account/pricing pages and return extracted fields via Claude API."""
     account_urls = competitor.get("account_urls") or [competitor["pricing_url"]]
+    name = competitor["name"]
     result: dict[str, object] = {
         "min_deposit_usd": competitor.get("known_min_deposit_usd"),
-        "leverage": competitor.get("known_leverage", []),
+        "leverage": [],
         "account_types": competitor.get("known_account_types", []),
         "instruments_count": None,
         "funding_methods": [],
         "spread_json": [],
+        "leverage_sources": {},
+        "leverage_confidence": None,
+        "leverage_reconciliation": {},
     }
 
     # Log config overrides applied up front
-    if competitor.get("known_leverage"):
-        print(f"    [config override] leverage: {result['leverage']}")
     if competitor.get("known_account_types"):
         print(f"    [config override] account_types: {result['account_types']}")
     if competitor.get("known_min_deposit_usd") is not None:
         print(f"    [config override] min_deposit_usd: {result['min_deposit_usd']}")
+
+    # If known_leverage is set, skip all leverage scraping entirely
+    if competitor.get("known_leverage"):
+        result["leverage"] = competitor["known_leverage"]
+        result["leverage_sources"] = {"config_override": competitor["known_leverage"]}
+        result["leverage_confidence"] = "high"
+        result["leverage_reconciliation"] = {"method": "config_override"}
+        print(f"    [config override] leverage: {result['leverage']}")
 
     combined_text = ""
     for url in account_urls:
@@ -364,12 +525,13 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         except PlaywrightTimeout:
             print(f"    [Pricing] Timeout loading {url}")
         except Exception as e:
-            print(f"    [Pricing] Error loading {url} for {competitor['name']}: {e}")
+            print(f"    [Pricing] Error loading {url} for {name}: {e}")
 
-    # Claude extraction for all fields
+    # Claude extraction for non-leverage fields
+    claude_result: dict = {}
     if combined_text.strip():
         try:
-            claude_result = _extract_with_claude(combined_text, competitor["name"])
+            claude_result = _extract_with_claude(combined_text, name) or {}
             if claude_result:
                 accounts = claude_result.get("accounts") or []
                 if not result["account_types"]:
@@ -378,16 +540,50 @@ async def scrape_pricing(page, competitor: dict) -> dict:
                     result["min_deposit_usd"] = claude_result.get("min_deposit_usd")
                 result["instruments_count"] = claude_result.get("instruments_count")
                 result["funding_methods"] = claude_result.get("funding_methods") or []
-
-                # Parse leverage from Claude's string (e.g. "1:500") into list
-                if not result["leverage"]:
-                    raw_lev = claude_result.get("max_leverage")
-                    if raw_lev:
-                        parsed = _parse_leverage_value(str(raw_lev))
-                        if parsed:
-                            result["leverage"] = [parsed]
         except Exception as e:
-            print(f"    [Claude] Extraction failed for {competitor['name']}: {e}")
+            print(f"    [Claude] Extraction failed for {name}: {e}")
+
+    # Enrich with WikiFX data: adds spread_json, fills account_types/min_deposit gaps
+    result = _enrich_from_wikifx(competitor, result)
+
+    # Cross-source leverage collection and reconciliation (skip if config override)
+    if not competitor.get("known_leverage"):
+        print(f"    [Leverage] Collecting from all sources for {name}...")
+
+        # Source 1: Claude (already extracted above)
+        claude_leverages = _collect_leverage_from_claude(combined_text, name) if not claude_result else []
+        if claude_result:
+            raw_lev = claude_result.get("max_leverage")
+            if raw_lev:
+                parsed = _parse_leverage_value(str(raw_lev))
+                claude_leverages = [parsed] if parsed else []
+
+        # Source 2: WikiFX (separate fetch for leverage)
+        time.sleep(1)
+        wikifx_leverages = _collect_leverage_from_wikifx(competitor)
+
+        # Source 3: TradingFinder
+        time.sleep(1)
+        tf_leverages = _collect_leverage_from_tradingfinder(competitor)
+
+        # Source 4: DailyForex
+        time.sleep(1)
+        df_leverages = _collect_leverage_from_dailyforex(competitor)
+
+        sources = {
+            "claude": claude_leverages,
+            "wikifx": wikifx_leverages,
+            "tradingfinder": tf_leverages,
+            "dailyforex": df_leverages,
+        }
+        print(f"    [Leverage] Sources: {sources}")
+
+        final_leverage, confidence, reconciliation = _reconcile_leverage(sources, name)
+        result["leverage"] = final_leverage
+        result["leverage_sources"] = sources
+        result["leverage_confidence"] = confidence
+        result["leverage_reconciliation"] = reconciliation
+        print(f"    [Leverage] Final: {final_leverage} (confidence: {confidence}, method: {reconciliation.get('method')})")
 
     print(
         f"    min_deposit={result['min_deposit_usd']} | "
@@ -396,13 +592,6 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         f"instruments={result['instruments_count']} | "
         f"funding={result['funding_methods']}"
     )
-
-    # Enrich with WikiFX data: adds spread_json, fills any remaining gaps
-    result = _enrich_from_wikifx(competitor, result)
-
-    # Additional fallbacks for leverage: TradingFinder, then DailyForex
-    result = _enrich_from_tradingfinder(competitor, result)
-    result = _enrich_from_dailyforex(competitor, result)
 
     return result
 
@@ -453,6 +642,9 @@ async def scrape_all():
                 account_types_json = json.dumps(data["account_types"])
                 funding_methods_json = json.dumps(data["funding_methods"])
                 spread_json = json.dumps(data["spread_json"]) if data.get("spread_json") else None
+                leverage_sources_json = json.dumps(data.get("leverage_sources", {}))
+                leverage_confidence = data.get("leverage_confidence")
+                leverage_reconciliation_json = json.dumps(data.get("leverage_reconciliation", {}))
 
                 conn.execute(
                     "DELETE FROM pricing_snapshots WHERE competitor_id=? AND snapshot_date=?",
@@ -462,8 +654,9 @@ async def scrape_all():
                     """
                     INSERT INTO pricing_snapshots
                         (competitor_id, snapshot_date, leverage_json, account_types_json,
-                         min_deposit_usd, instruments_count, funding_methods_json, spread_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         min_deposit_usd, instruments_count, funding_methods_json, spread_json,
+                         leverage_sources_json, leverage_confidence, leverage_reconciliation_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         cid,
@@ -474,6 +667,9 @@ async def scrape_all():
                         data["instruments_count"],
                         funding_methods_json,
                         spread_json,
+                        leverage_sources_json,
+                        leverage_confidence,
+                        leverage_reconciliation_json,
                     ),
                 )
                 conn.commit()

@@ -134,6 +134,21 @@ export function runMigrations() {
   } catch {
     // Column already exists — ignore
   }
+  try {
+    sqlite.exec(`ALTER TABLE pricing_snapshots ADD COLUMN leverage_sources_json TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    sqlite.exec(`ALTER TABLE pricing_snapshots ADD COLUMN leverage_confidence TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    sqlite.exec(`ALTER TABLE pricing_snapshots ADD COLUMN leverage_reconciliation_json TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   // is_self column — identifies Pepperstone as the self-benchmark (not a competitor)
   try {

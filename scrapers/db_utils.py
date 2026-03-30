@@ -39,6 +39,14 @@ def get_db() -> sqlite3.Connection:
     except Exception:
         pass  # column already exists
 
+    # Additive migration: cross-source leverage validation columns
+    for col in ("leverage_sources_json", "leverage_confidence", "leverage_reconciliation_json"):
+        try:
+            conn.execute(f"ALTER TABLE pricing_snapshots ADD COLUMN {col} TEXT")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
