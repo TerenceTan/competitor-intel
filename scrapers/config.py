@@ -76,6 +76,7 @@ COMPETITORS = [
             "https://www.vantagemarkets.com/trading/accounts/",            # account types + min deposits
             "https://www.vantagemarkets.com/en/deposit-withdrawals-policy/",  # funding/payment methods
             "https://www.vantagemarkets.com/trading/all-instruments/",     # 1000+ instruments
+            "https://www.vantagemarketsea.com/en/trading/accounts/",
         ],
         "promo_url": "https://www.vantagemarkets.com/promotions/",
         "youtube_query": "Vantage Markets trading",
