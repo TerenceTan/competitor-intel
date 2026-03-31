@@ -140,10 +140,64 @@ def _extract_marketing_strategy(html: str) -> list[dict]:
     return items
 
 
-def _extract_accounts_from_html(html: str) -> list[dict]:
-    """Parse account table rows from raw HTML."""
+def _extract_accounts_from_nuxt(html: str) -> list[dict]:
+    """
+    Extract account info from WikiFX's __NUXT__ inline JSON data.
+    WikiFX uses Nuxt.js and embeds traderAccountInfo as a JS object
+    in `window.__NUXT__`.
+    """
     accounts: list[dict] = []
-    # Find all <table> blocks
+
+    # Find the __NUXT__ script payload
+    nuxt_match = re.search(r'window\.__NUXT__\s*=\s*(\{[\s\S]*?\});?\s*</script>', html)
+    if not nuxt_match:
+        return accounts
+
+    nuxt_raw = nuxt_match.group(1)
+
+    # Extract traderAccountInfo array entries using regex
+    # Pattern matches objects within the traderAccountInfo array
+    acc_block = re.search(r'traderAccountInfo\s*:\s*\[([\s\S]*?)\]', nuxt_raw)
+    if not acc_block:
+        return accounts
+
+    # Parse individual account objects from the array
+    for obj_match in re.finditer(r'\{([^{}]+)\}', acc_block.group(1)):
+        obj_text = obj_match.group(1)
+        acc: dict = {}
+
+        # Extract key fields using regex (JS object notation, not strict JSON)
+        for field, keys in [
+            ("name", ("accountName",)),
+            ("min_deposit", ("minDeposit", "minCash")),
+            ("max_leverage", ("maxLeverage",)),
+            ("spread_from", ("minimumSpread",)),
+            ("commission", ("commission",)),
+        ]:
+            for key in keys:
+                m = re.search(rf'{key}\s*:\s*["\']([^"\']*)["\']', obj_text)
+                if m and m.group(1).strip() and m.group(1).strip() != "--":
+                    acc[field] = m.group(1).strip()
+                    break
+
+        if acc.get("name"):
+            accounts.append(acc)
+
+    return accounts
+
+
+def _extract_accounts_from_html(html: str) -> list[dict]:
+    """
+    Parse account data from WikiFX page.
+    Primary: extract from __NUXT__ inline JSON (traderAccountInfo).
+    Fallback: parse HTML <table> blocks.
+    """
+    # Try __NUXT__ JSON extraction first (most reliable for WikiFX)
+    accounts = _extract_accounts_from_nuxt(html)
+    if accounts:
+        return accounts
+
+    # Fallback: parse HTML tables
     for table_match in re.finditer(r'<table[^>]*>([\s\S]*?)</table>', html, re.IGNORECASE):
         table_html = table_match.group(1)
         rows = re.findall(r'<tr[^>]*>([\s\S]*?)</tr>', table_html, re.IGNORECASE)
