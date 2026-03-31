@@ -140,6 +140,46 @@ def _extract_marketing_strategy(html: str) -> list[dict]:
     return items
 
 
+def _extract_nuxt_object(html: str) -> str | None:
+    """
+    Extract the full window.__NUXT__ object using bracket counting
+    to correctly handle nested structures.
+    """
+    m = re.search(r'window\.__NUXT__\s*=\s*\{', html)
+    if not m:
+        return None
+
+    start = m.end() - 1  # position of the opening {
+    depth = 0
+    in_string = False
+    escape_next = False
+    string_char = None
+
+    for i in range(start, min(start + 500_000, len(html))):
+        c = html[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if c == '\\' and in_string:
+            escape_next = True
+            continue
+        if in_string:
+            if c == string_char:
+                in_string = False
+            continue
+        if c in ('"', "'"):
+            in_string = True
+            string_char = c
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                return html[start:i + 1]
+    return None
+
+
 def _extract_accounts_from_nuxt(html: str) -> list[dict]:
     """
     Extract account info from WikiFX's __NUXT__ inline JSON data.
@@ -148,40 +188,67 @@ def _extract_accounts_from_nuxt(html: str) -> list[dict]:
     """
     accounts: list[dict] = []
 
-    # Find the __NUXT__ script payload
-    nuxt_match = re.search(r'window\.__NUXT__\s*=\s*(\{[\s\S]*?\});?\s*</script>', html)
-    if not nuxt_match:
+    nuxt_raw = _extract_nuxt_object(html)
+    if not nuxt_raw:
         return accounts
 
-    nuxt_raw = nuxt_match.group(1)
-
-    # Extract traderAccountInfo array entries using regex
-    # Pattern matches objects within the traderAccountInfo array
-    acc_block = re.search(r'traderAccountInfo\s*:\s*\[([\s\S]*?)\]', nuxt_raw)
-    if not acc_block:
+    # Extract traderAccountInfo array using bracket counting
+    arr_match = re.search(r'traderAccountInfo\s*:\s*\[', nuxt_raw)
+    if not arr_match:
         return accounts
 
-    # Parse individual account objects from the array
-    for obj_match in re.finditer(r'\{([^{}]+)\}', acc_block.group(1)):
-        obj_text = obj_match.group(1)
-        acc: dict = {}
+    # Find matching ] for the array
+    arr_start = arr_match.end() - 1
+    depth = 0
+    arr_end = arr_start
+    for i in range(arr_start, len(nuxt_raw)):
+        if nuxt_raw[i] == '[':
+            depth += 1
+        elif nuxt_raw[i] == ']':
+            depth -= 1
+            if depth == 0:
+                arr_end = i + 1
+                break
 
-        # Extract key fields using regex (JS object notation, not strict JSON)
-        for field, keys in [
-            ("name", ("accountName",)),
-            ("min_deposit", ("minDeposit", "minCash")),
-            ("max_leverage", ("maxLeverage",)),
-            ("spread_from", ("minimumSpread",)),
-            ("commission", ("commission",)),
-        ]:
-            for key in keys:
-                m = re.search(rf'{key}\s*:\s*["\']([^"\']*)["\']', obj_text)
-                if m and m.group(1).strip() and m.group(1).strip() != "--":
-                    acc[field] = m.group(1).strip()
-                    break
+    arr_content = nuxt_raw[arr_start + 1:arr_end - 1]
 
-        if acc.get("name"):
-            accounts.append(acc)
+    # Parse individual account objects (top-level objects in the array)
+    # Use bracket counting to handle nested objects
+    obj_start = None
+    depth = 0
+    for i, c in enumerate(arr_content):
+        if c == '{':
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0 and obj_start is not None:
+                obj_text = arr_content[obj_start + 1:i]
+                acc: dict = {}
+
+                for field, keys in [
+                    ("name", ("accountName",)),
+                    ("min_deposit", ("minDeposit", "minCash")),
+                    ("max_leverage", ("maxLeverage",)),
+                    ("spread_from", ("minimumSpread",)),
+                    ("commission", ("commission",)),
+                ]:
+                    for key in keys:
+                        # Match quoted values: key:"value" or key:'value'
+                        m = re.search(rf'{key}\s*:\s*["\']([^"\']*)["\']', obj_text)
+                        if m and m.group(1).strip() and m.group(1).strip() != "--":
+                            acc[field] = m.group(1).strip()
+                            break
+                        # Match unquoted numeric values: key:200 or key:0.5
+                        m = re.search(rf'{key}\s*:\s*(\d+(?:\.\d+)?)', obj_text)
+                        if m:
+                            acc[field] = m.group(1).strip()
+                            break
+
+                if acc.get("name"):
+                    accounts.append(acc)
+                obj_start = None
 
     return accounts
 

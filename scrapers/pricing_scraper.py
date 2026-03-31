@@ -22,7 +22,6 @@ import json
 import os
 import re
 import sys
-import time
 from datetime import datetime, timezone
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout  # type: ignore[import]
@@ -214,21 +213,31 @@ def _collect_leverage_from_claude(combined_text: str, broker_name: str) -> list[
     return []
 
 
-def _collect_leverage_from_wikifx(competitor: dict) -> list[str]:
+def _fetch_cached(url: str, cache: dict[str, str | None], label: str) -> str | None:
+    """Fetch a URL, caching the HTML result. Returns HTML or None on failure."""
+    if url in cache:
+        return cache[url]
+    try:
+        status, html = _fetch(url)
+        if status == 200 and len(html) >= 1000:
+            cache[url] = html
+            return html
+        print(f"    [{label}] HTTP {status} or empty page")
+    except Exception as e:
+        print(f"    [{label}] Fetch error: {e}")
+    cache[url] = None
+    return None
+
+
+def _collect_leverage_from_wikifx(competitor: dict, cache: dict[str, str | None] | None = None) -> list[str]:
     """Extract leverage from WikiFX broker page (account table + text scan)."""
     wikifx_id = competitor.get("wikifx_id")
-    name = competitor["name"]
     if not wikifx_id:
         return []
 
     url = f"https://www.wikifx.com/en/dealer/{wikifx_id}.html"
-    try:
-        status, html = _fetch(url)
-    except Exception as e:
-        print(f"    [WikiFX leverage] Fetch error for {name}: {e}")
-        return []
-
-    if status != 200 or len(html) < 1000:
+    html = _fetch_cached(url, cache if cache is not None else {}, "WikiFX leverage")
+    if not html:
         return []
 
     leverages: list[str] = []
@@ -253,20 +262,15 @@ def _collect_leverage_from_wikifx(competitor: dict) -> list[str]:
     return leverages
 
 
-def _collect_leverage_from_tradingfinder(competitor: dict) -> list[str]:
+def _collect_leverage_from_tradingfinder(competitor: dict, cache: dict[str, str | None] | None = None) -> list[str]:
     """Extract leverage from TradingFinder broker review page."""
     slug = competitor.get("tradingfinder_slug")
     if not slug:
         return []
 
     url = f"https://tradingfinder.com/brokers/{slug}/"
-    try:
-        status, html = _fetch(url)
-    except Exception as e:
-        print(f"    [TradingFinder leverage] Fetch error for {competitor['name']}: {e}")
-        return []
-
-    if status != 200 or len(html) < 1000:
+    html = _fetch_cached(url, cache if cache is not None else {}, "TradingFinder leverage")
+    if not html:
         return []
 
     leverages: list[str] = []
@@ -279,20 +283,15 @@ def _collect_leverage_from_tradingfinder(competitor: dict) -> list[str]:
     return leverages
 
 
-def _collect_leverage_from_dailyforex(competitor: dict) -> list[str]:
+def _collect_leverage_from_dailyforex(competitor: dict, cache: dict[str, str | None] | None = None) -> list[str]:
     """Extract leverage from DailyForex broker review page."""
     slug = competitor.get("dailyforex_slug")
     if not slug:
         return []
 
     url = f"https://www.dailyforex.com/forex-brokers/{slug}-review"
-    try:
-        status, html = _fetch(url)
-    except Exception as e:
-        print(f"    [DailyForex leverage] Fetch error for {competitor['name']}: {e}")
-        return []
-
-    if status != 200 or len(html) < 1000:
+    html = _fetch_cached(url, cache if cache is not None else {}, "DailyForex leverage")
+    if not html:
         return []
 
     leverages: list[str] = []
@@ -327,20 +326,15 @@ def _parse_min_deposit(raw: str) -> float | None:
     return None
 
 
-def _collect_min_deposit_from_wikifx(competitor: dict) -> float | None:
+def _collect_min_deposit_from_wikifx(competitor: dict, cache: dict[str, str | None] | None = None) -> float | None:
     """Extract min deposit from WikiFX broker page account table."""
     wikifx_id = competitor.get("wikifx_id")
     if not wikifx_id:
         return None
 
     url = f"https://www.wikifx.com/en/dealer/{wikifx_id}.html"
-    try:
-        status, html = _fetch(url)
-    except Exception as e:
-        print(f"    [WikiFX min_deposit] Fetch error for {competitor['name']}: {e}")
-        return None
-
-    if status != 200 or len(html) < 1000:
+    html = _fetch_cached(url, cache if cache is not None else {}, "WikiFX min_deposit")
+    if not html:
         return None
 
     accounts = _extract_accounts_from_html(html)
@@ -352,20 +346,15 @@ def _collect_min_deposit_from_wikifx(competitor: dict) -> float | None:
     return min(deposits) if deposits else None
 
 
-def _collect_min_deposit_from_tradingfinder(competitor: dict) -> float | None:
+def _collect_min_deposit_from_tradingfinder(competitor: dict, cache: dict[str, str | None] | None = None) -> float | None:
     """Extract min deposit from TradingFinder broker review page."""
     slug = competitor.get("tradingfinder_slug")
     if not slug:
         return None
 
     url = f"https://tradingfinder.com/brokers/{slug}/"
-    try:
-        status, html = _fetch(url)
-    except Exception as e:
-        print(f"    [TradingFinder min_deposit] Fetch error for {competitor['name']}: {e}")
-        return None
-
-    if status != 200 or len(html) < 1000:
+    html = _fetch_cached(url, cache if cache is not None else {}, "TradingFinder min_deposit")
+    if not html:
         return None
 
     # Look for patterns like "Min Deposit: $20", "Minimum Deposit: USD 50"
@@ -380,20 +369,15 @@ def _collect_min_deposit_from_tradingfinder(competitor: dict) -> float | None:
     return None
 
 
-def _collect_min_deposit_from_dailyforex(competitor: dict) -> float | None:
+def _collect_min_deposit_from_dailyforex(competitor: dict, cache: dict[str, str | None] | None = None) -> float | None:
     """Extract min deposit from DailyForex broker review page."""
     slug = competitor.get("dailyforex_slug")
     if not slug:
         return None
 
     url = f"https://www.dailyforex.com/forex-brokers/{slug}-review"
-    try:
-        status, html = _fetch(url)
-    except Exception as e:
-        print(f"    [DailyForex min_deposit] Fetch error for {competitor['name']}: {e}")
-        return None
-
-    if status != 200 or len(html) < 1000:
+    html = _fetch_cached(url, cache if cache is not None else {}, "DailyForex min_deposit")
+    if not html:
         return None
 
     for m in re.finditer(
@@ -685,6 +669,8 @@ Return ONLY a JSON object:
                 "disagreement": {s: f"1:{v}" for s, v in max_per_source.items()},
             }
 
+    return [], "low", {"method": "no_data"}
+
 
 # ---------------------------------------------------------------------------
 # Main scraper
@@ -766,6 +752,9 @@ async def scrape_pricing(page, competitor: dict) -> dict:
     # Enrich with WikiFX data: adds spread_json, fills account_types/min_deposit gaps
     result = _enrich_from_wikifx(competitor, result)
 
+    # Shared HTML cache for cross-source collection — each URL is fetched at most once
+    html_cache: dict[str, str | None] = {}
+
     # Cross-source leverage collection and reconciliation (skip if config override)
     if not competitor.get("known_leverage"):
         print(f"    [Leverage] Collecting from all sources for {name}...")
@@ -778,17 +767,17 @@ async def scrape_pricing(page, competitor: dict) -> dict:
                 parsed = _parse_leverage_value(str(raw_lev))
                 claude_leverages = [parsed] if parsed else []
 
-        # Source 2: WikiFX (separate fetch for leverage)
-        time.sleep(1)
-        wikifx_leverages = _collect_leverage_from_wikifx(competitor)
+        # Source 2: WikiFX
+        await asyncio.sleep(1)
+        wikifx_leverages = _collect_leverage_from_wikifx(competitor, html_cache)
 
         # Source 3: TradingFinder
-        time.sleep(1)
-        tf_leverages = _collect_leverage_from_tradingfinder(competitor)
+        await asyncio.sleep(1)
+        tf_leverages = _collect_leverage_from_tradingfinder(competitor, html_cache)
 
         # Source 4: DailyForex
-        time.sleep(1)
-        df_leverages = _collect_leverage_from_dailyforex(competitor)
+        await asyncio.sleep(1)
+        df_leverages = _collect_leverage_from_dailyforex(competitor, html_cache)
 
         sources = {
             "claude": claude_leverages,
@@ -812,17 +801,14 @@ async def scrape_pricing(page, competitor: dict) -> dict:
         # Source 1: Claude (already extracted above)
         claude_min_dep = claude_result.get("min_deposit_usd") if claude_result else None
 
-        # Source 2: WikiFX
-        time.sleep(1)
-        wikifx_min_dep = _collect_min_deposit_from_wikifx(competitor)
+        # Source 2: WikiFX (reuses cached HTML from leverage collection)
+        wikifx_min_dep = _collect_min_deposit_from_wikifx(competitor, html_cache)
 
-        # Source 3: TradingFinder
-        time.sleep(1)
-        tf_min_dep = _collect_min_deposit_from_tradingfinder(competitor)
+        # Source 3: TradingFinder (reuses cached HTML)
+        tf_min_dep = _collect_min_deposit_from_tradingfinder(competitor, html_cache)
 
-        # Source 4: DailyForex
-        time.sleep(1)
-        df_min_dep = _collect_min_deposit_from_dailyforex(competitor)
+        # Source 4: DailyForex (reuses cached HTML)
+        df_min_dep = _collect_min_deposit_from_dailyforex(competitor, html_cache)
 
         dep_sources = {
             "claude": claude_min_dep,
