@@ -4,31 +4,19 @@ import {
   aiPortfolioInsights,
   changeEvents,
   competitors,
+  promoSnapshots,
+  reputationSnapshots,
   scraperRuns,
 } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, gte, sql } from "drizzle-orm";
 import { Card } from "@/components/ui/card";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, safeParseJson } from "@/lib/utils";
 import Link from "next/link";
 import { AlertCircle, Calendar, Clock, TrendingUp, Zap } from "lucide-react";
 import { TimeAgo } from "@/components/ui/time-ago";
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const colorMap: Record<string, string> = {
-    critical: "bg-red-50 text-red-700 border-red-200",
-    high: "bg-orange-50 text-orange-700 border-orange-200",
-    medium: "bg-amber-50 text-amber-700 border-amber-200",
-    low: "bg-blue-50 text-blue-700 border-blue-200",
-  };
-  const cls = colorMap[severity?.toLowerCase()] ?? "bg-gray-100 text-gray-600 border-gray-200";
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}
-    >
-      {severity ?? "unknown"}
-    </span>
-  );
-}
+import { SeverityBadge } from "@/components/shared/severity-badge";
+import { KpiRow } from "@/components/charts/kpi-row";
+import { SCRAPERS } from "@/lib/constants";
 
 export default async function ExecutiveSummaryPage() {
   // Fetch all competitors for lookup
@@ -56,24 +44,55 @@ export default async function ExecutiveSummaryPage() {
     .orderBy(desc(changeEvents.detectedAt))
     .limit(20);
 
-  const SCRAPER_DEFS = [
-    { name: "Pricing Scraper", dbName: "pricing_scraper", domain: "pricing" },
-    { name: "Promo Scraper", dbName: "promo_scraper", domain: "promotions" },
-    { name: "Social Scraper", dbName: "social_scraper", domain: "social" },
-    { name: "Reputation Scraper", dbName: "reputation_scraper", domain: "reputation" },
-    { name: "News Scraper", dbName: "news_scraper", domain: "news" },
-    { name: "AI Analysis", dbName: "ai_analyzer", domain: "insights" },
-  ];
+  // KPI data: changes this week + last 14 days by day
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const changesThisWeek = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(changeEvents)
+    .where(gte(changeEvents.detectedAt, weekAgo));
+  const changesByDayRaw = await db
+    .select({ day: sql<string>`date(detected_at)`, count: sql<number>`count(*)` })
+    .from(changeEvents)
+    .where(gte(changeEvents.detectedAt, twoWeeksAgo))
+    .groupBy(sql`date(detected_at)`)
+    .orderBy(sql`date(detected_at)`);
+  const changesByDay = changesByDayRaw.map((r) => ({ value: r.count }));
+
+  // KPI: avg trustpilot across latest reputation snapshots per competitor
+  const latestRepScores = await db
+    .select({ score: reputationSnapshots.trustpilotScore })
+    .from(reputationSnapshots)
+    .where(sql`${reputationSnapshots.id} IN (
+      SELECT MAX(id) FROM reputation_snapshots GROUP BY competitor_id
+    )`)
+    .all();
+  const validScores = latestRepScores.filter((r) => r.score != null).map((r) => r.score!);
+  const avgTrustpilot = validScores.length > 0 ? validScores.reduce((a, b) => a + b, 0) / validScores.length : null;
+
+  // KPI: active promos count (from latest promo snapshots)
+  const latestPromos = await db
+    .select({ promotionsJson: promoSnapshots.promotionsJson })
+    .from(promoSnapshots)
+    .where(sql`${promoSnapshots.id} IN (
+      SELECT MAX(id) FROM promo_snapshots GROUP BY competitor_id
+    )`)
+    .all();
+  let activePromoCount = 0;
+  for (const p of latestPromos) {
+    const promos = safeParseJson<unknown[]>(p.promotionsJson, [], "promotionsJson");
+    activePromoCount += Array.isArray(promos) ? promos.length : 0;
+  }
 
   const latestRuns = await Promise.all(
-    SCRAPER_DEFS.map(async (s) => {
+    SCRAPERS.map(async (s) => {
       const [run] = await db
         .select()
         .from(scraperRuns)
         .where(eq(scraperRuns.scraperName, s.dbName))
         .orderBy(desc(scraperRuns.startedAt))
         .limit(1);
-      return { ...s, run: run ?? null };
+      return { label: s.label, domain: s.domain, run: run ?? null };
     })
   );
 
@@ -87,10 +106,19 @@ export default async function ExecutiveSummaryPage() {
         </p>
       </div>
 
+      {/* KPI Stats */}
+      <KpiRow
+        competitorCount={allCompetitors.filter((c) => !c.isSelf).length}
+        changesThisWeek={changesThisWeek[0]?.count ?? 0}
+        changesByDay={changesByDay}
+        avgTrustpilot={avgTrustpilot}
+        activePromos={activePromoCount}
+      />
+
       {/* Recommended Actions */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <Zap className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <Zap className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">Recommended Actions</h2>
           {latestPortfolio && (
             <span className="text-gray-500 text-sm">
@@ -105,8 +133,7 @@ export default async function ExecutiveSummaryPage() {
           </div>
         ) : (() => {
           type PortfolioAction = { action: string; urgency: string; rationale?: string };
-          let actions: PortfolioAction[] = [];
-          try { actions = latestPortfolio.actionsJson ? JSON.parse(latestPortfolio.actionsJson) : []; } catch {}
+          const actions = safeParseJson<PortfolioAction[]>(latestPortfolio.actionsJson, [], "actionsJson");
 
           type UrgencyKey = "immediate" | "this_week" | "this_month";
           const urgencyConfig: Record<UrgencyKey, { label: string; border: string; badge: string; icon: React.ElementType; iconColor: string }> = {
@@ -170,7 +197,7 @@ export default async function ExecutiveSummaryPage() {
       {/* Top Things to Know Today */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <TrendingUp className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <TrendingUp className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">
             Top Things to Know Today
           </h2>
@@ -184,12 +211,7 @@ export default async function ExecutiveSummaryPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {topInsights.map((insight) => {
               const competitor = competitorMap[insight.competitorId];
-              let keyFindings: Array<{ finding: string; severity: string }> = [];
-              try {
-                keyFindings = insight.keyFindingsJson
-                  ? JSON.parse(insight.keyFindingsJson)
-                  : [];
-              } catch {}
+              const keyFindings = safeParseJson<Array<{ finding: string; severity: string }>>(insight.keyFindingsJson, [], "keyFindingsJson");
               const topFinding = keyFindings[0];
 
               return (
@@ -199,7 +221,7 @@ export default async function ExecutiveSummaryPage() {
                   className="block"
                 >
                   <Card
-                    className="p-5 border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors cursor-pointer bg-white"
+                    className="p-5 border-gray-200 hover:border-primary/25 hover:shadow-md active:shadow-sm transition-all cursor-pointer bg-white"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div>
@@ -233,7 +255,7 @@ export default async function ExecutiveSummaryPage() {
       {/* Recent Changes Feed */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <Activity className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <Activity className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">
             Recent Changes Feed
           </h2>
@@ -250,7 +272,7 @@ export default async function ExecutiveSummaryPage() {
           >
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200">
+                <tr className="border-b border-gray-200 bg-gray-50/80">
                   <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
                     When
                   </th>
@@ -274,7 +296,7 @@ export default async function ExecutiveSummaryPage() {
                   return (
                     <tr
                       key={event.id}
-                      className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+                      className={`border-b border-gray-100 hover:bg-primary/[0.03] transition-colors ${
                         idx === recentChanges.length - 1 ? "border-b-0" : ""
                       }`}
                     >
@@ -284,8 +306,7 @@ export default async function ExecutiveSummaryPage() {
                       <td className="px-4 py-3">
                         <Link
                           href={`/competitors/${event.competitorId}`}
-                          className="hover:underline font-medium"
-                          style={{ color: "#0064FA" }}
+                          className="font-medium text-primary hover:text-primary/80 transition-colors"
                         >
                           {competitor?.name ?? event.competitorId}
                         </Link>
@@ -317,7 +338,7 @@ export default async function ExecutiveSummaryPage() {
       {/* Data Freshness Grid */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <Clock className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <Clock className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">
             Data Freshness / Scraper Status
           </h2>
@@ -328,7 +349,7 @@ export default async function ExecutiveSummaryPage() {
         >
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
+              <tr className="border-b border-gray-200 bg-gray-50/80">
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
                   Scraper
                 </th>
@@ -368,12 +389,12 @@ export default async function ExecutiveSummaryPage() {
                   status.charAt(0).toUpperCase() + status.slice(1);
                 return (
                   <tr
-                    key={scraper.name}
+                    key={scraper.label}
                     className={`border-b border-gray-100 ${
                       idx === latestRuns.length - 1 ? "border-b-0" : ""
                     }`}
                   >
-                    <td className="px-4 py-3 text-gray-700 font-medium">{scraper.name}</td>
+                    <td className="px-4 py-3 text-gray-700 font-medium">{scraper.label}</td>
                     <td className="px-4 py-3 text-gray-500 capitalize">{scraper.domain}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${statusStyle}`}>

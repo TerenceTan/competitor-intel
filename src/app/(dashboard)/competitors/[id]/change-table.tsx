@@ -1,6 +1,7 @@
 "use client";
 
 import { timeAgo } from "@/lib/utils";
+import { SeverityBadge } from "@/components/shared/severity-badge";
 
 interface ChangeEvent {
   id: number;
@@ -11,25 +12,6 @@ interface ChangeEvent {
   newValue: string | null;
   severity: string;
   detectedAt: string;
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const colorMap: Record<string, string> = {
-    critical: "bg-red-50 text-red-700 border-red-200",
-    high: "bg-orange-50 text-orange-700 border-orange-200",
-    medium: "bg-amber-50 text-amber-700 border-amber-200",
-    low: "bg-blue-50 text-blue-700 border-blue-200",
-  };
-  const cls =
-    colorMap[severity?.toLowerCase()] ??
-    "bg-gray-100 text-gray-600 border-gray-200";
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}
-    >
-      {severity ?? "unknown"}
-    </span>
-  );
 }
 
 export function CompetitorChangeTable({
@@ -74,7 +56,7 @@ export function CompetitorChangeTable({
       <div className="flex justify-end">
         <button
           onClick={exportCSV}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-500 hover:text-gray-700 hover:border-gray-400 transition-colors"
+          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           Export CSV
         </button>
@@ -84,7 +66,7 @@ export function CompetitorChangeTable({
       >
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200">
+            <tr className="border-b border-gray-200 bg-gray-50/80">
               <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
                 When
               </th>
@@ -109,7 +91,7 @@ export function CompetitorChangeTable({
             {changes.map((event, idx) => (
               <tr
                 key={event.id}
-                className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+                className={`border-b border-gray-100 hover:bg-primary/[0.03] transition-colors ${
                   idx === changes.length - 1 ? "border-b-0" : ""
                 }`}
               >

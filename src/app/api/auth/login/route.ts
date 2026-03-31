@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 
 function deriveToken(password: string): string {
   return createHash("sha256").update(password).digest("hex");
@@ -9,6 +9,7 @@ function deriveToken(password: string): string {
 const failedAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
+const MAX_PASSWORD_LENGTH = 500;
 
 function checkLoginRateLimit(ip: string): { allowed: boolean; retryAfterSecs?: number } {
   const now = Date.now();
@@ -30,9 +31,17 @@ function recordFailedAttempt(ip: string) {
   }
 }
 
+/** Resolve client IP — prefer x-real-ip (set by trusted proxies) over x-forwarded-for */
+function getClientIp(request: NextRequest): string {
+  return (
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    "unknown"
+  );
+}
+
 export async function POST(request: NextRequest) {
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  const ip = getClientIp(request);
 
   const { allowed, retryAfterSecs } = checkLoginRateLimit(ip);
   if (!allowed) {
@@ -43,14 +52,21 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const password = typeof body?.password === "string" ? body.password : "";
+  const rawPassword = typeof body?.password === "string" ? body.password : "";
+  // Enforce length limit to prevent DoS via extremely long passwords
+  const password = rawPassword.slice(0, MAX_PASSWORD_LENGTH);
 
   const expectedPassword = process.env.DASHBOARD_PASSWORD;
   if (!expectedPassword) {
     return NextResponse.json({ error: "Server misconfiguration" }, { status: 503 });
   }
 
-  if (password !== expectedPassword) {
+  // Constant-time comparison to prevent timing attacks
+  const passwordsMatch =
+    password.length === expectedPassword.length &&
+    timingSafeEqual(Buffer.from(password), Buffer.from(expectedPassword));
+
+  if (!passwordsMatch) {
     recordFailedAttempt(ip);
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
@@ -64,7 +80,7 @@ export async function POST(request: NextRequest) {
   response.cookies.set("auth_token", tokenValue, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 8, // 8 hours
     path: "/",
     sameSite: "strict",
   });

@@ -1,21 +1,9 @@
 import { db } from "@/db";
 import { markets } from "@/db/schema";
 import Link from "next/link";
-
-const MARKET_FLAGS: Record<string, string> = {
-  sg: "🇸🇬",
-  hk: "🇭🇰",
-  th: "🇹🇭",
-  vn: "🇻🇳",
-  id: "🇮🇩",
-  my: "🇲🇾",
-  jp: "🇯🇵",
-  mn: "🇲🇳",
-  in: "🇮🇳",
-  ph: "🇵🇭",
-  tw: "🇹🇼",
-  cn: "🇨🇳",
-};
+import { Globe } from "lucide-react";
+import { EmptyState } from "@/components/shared/empty-state";
+import { MARKET_FLAGS } from "@/lib/constants";
 
 export default async function MarketsPage() {
   const allMarkets = await db.select().from(markets);
@@ -31,11 +19,11 @@ export default async function MarketsPage() {
       </div>
 
       {allMarkets.length === 0 ? (
-        <div
-          className="rounded-xl border border-gray-200 p-8 text-center text-gray-500 bg-white"
-        >
-          No markets configured yet.
-        </div>
+        <EmptyState
+          icon={Globe}
+          title="No markets configured"
+          description="Markets will appear here once configured in the database."
+        />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {allMarkets.map((market) => {
@@ -47,7 +35,7 @@ export default async function MarketsPage() {
                 className="block"
               >
                 <div
-                  className="rounded-xl border border-gray-200 bg-white p-5 text-center hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer"
+                  className="rounded-xl border border-gray-200 bg-white p-5 text-center hover:border-primary/30 hover:shadow-md active:shadow-sm transition-all cursor-pointer"
                 >
                   <div className="text-4xl mb-3">{flag}</div>
                   <p className="text-gray-900 font-semibold text-sm">

@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { TimeAgo } from "@/components/ui/time-ago";
+import { cn } from "@/lib/utils";
 
 interface ScraperRun {
   scraperName: string;
@@ -20,7 +22,7 @@ interface Scraper {
 }
 
 interface Props {
-  scrapers: Scraper[];
+  scrapers: readonly Scraper[];
   latestRunMap: Record<string, ScraperRun>;
 }
 
@@ -53,19 +55,19 @@ export function ScraperTable({ scrapers, latestRunMap }: Props) {
         <button
           onClick={() => handleRun("all")}
           disabled={runningMap["all"]}
-          className="px-4 py-1.5 text-xs rounded-lg border transition-colors disabled:cursor-not-allowed font-medium"
-          style={
+          className={cn(
+            "px-4 py-1.5 text-xs rounded-lg border transition-colors disabled:cursor-not-allowed font-medium",
             runningMap["all"]
-              ? { backgroundColor: "#f3f4f6", color: "#9ca3af", borderColor: "#e5e7eb" }
-              : { backgroundColor: "#0064FA", color: "#fff", borderColor: "#0064FA" }
-          }
+              ? "bg-gray-100 text-gray-400 border-gray-200"
+              : "bg-primary text-white border-primary hover:bg-primary/90 active:bg-primary/80"
+          )}
         >
-          {runningMap["all"] ? "Running all…" : "Run All Scrapers"}
+          {runningMap["all"] ? <><Loader2 className="w-3 h-3 animate-spin inline mr-1" />Running all…</> : "Run All Scrapers"}
         </button>
       </div>
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-200">
+          <tr className="border-b border-gray-200 bg-gray-50/80">
             <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
               Scraper
             </th>
@@ -103,7 +105,7 @@ export function ScraperTable({ scrapers, latestRunMap }: Props) {
             return (
               <tr
                 key={scraper.name}
-                className={`border-b border-gray-100 ${
+                className={`border-b border-gray-100 hover:bg-primary/[0.03] transition-colors ${
                   idx === scrapers.length - 1 ? "border-b-0" : ""
                 }`}
               >
@@ -130,14 +132,14 @@ export function ScraperTable({ scrapers, latestRunMap }: Props) {
                   <button
                     onClick={() => handleRun(scraper.name)}
                     disabled={isRunning}
-                    className="px-3 py-1 text-xs rounded-lg border transition-colors disabled:cursor-not-allowed"
-                    style={
+                    className={cn(
+                      "px-3 py-1 text-xs rounded-lg border transition-colors disabled:cursor-not-allowed",
                       isRunning
-                        ? { backgroundColor: "#f3f4f6", color: "#9ca3af", borderColor: "#e5e7eb" }
-                        : { backgroundColor: "#0064FA", color: "#fff", borderColor: "#0064FA" }
-                    }
+                        ? "bg-gray-100 text-gray-400 border-gray-200"
+                        : "bg-primary text-white border-primary hover:bg-primary/90 active:bg-primary/80"
+                    )}
                   >
-                    {isRunning ? "Starting…" : "Run"}
+                    {isRunning ? <><Loader2 className="w-3 h-3 animate-spin inline mr-1" />Running…</> : "Run"}
                   </button>
                 </td>
               </tr>

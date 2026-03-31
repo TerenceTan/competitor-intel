@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
-import { createHash } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 
 const SCRAPER_FILES: Record<string, string> = {
   "pricing-scraper": "pricing_scraper.py",
@@ -41,7 +41,19 @@ function isAuthenticated(request: NextRequest): boolean {
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return false;
   const authToken = request.cookies.get("auth_token")?.value;
-  return authToken === deriveToken(password);
+  if (!authToken) return false;
+  const expected = deriveToken(password);
+  if (authToken.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(authToken), Buffer.from(expected));
+}
+
+/** Resolve client IP — prefer x-real-ip (set by trusted proxies) over x-forwarded-for */
+function getClientIp(request: NextRequest): string {
+  return (
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    "unknown"
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -49,8 +61,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  const ip = getClientIp(req);
   if (!checkRateLimit(ip)) {
     return NextResponse.json(
       { error: "Too many requests — try again in 15 minutes" },
@@ -73,7 +84,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unknown scraper" }, { status: 400 });
   }
 
-  const scriptPath = path.join(process.cwd(), "scrapers", filename);
+  // Path traversal guard: resolved path must stay within scrapers directory
+  const scrapersDir = path.resolve(path.join(process.cwd(), "scrapers"));
+  const scriptPath = path.resolve(path.join(scrapersDir, filename));
+  if (!scriptPath.startsWith(scrapersDir + path.sep)) {
+    return NextResponse.json({ error: "Invalid scraper path" }, { status: 400 });
+  }
 
   runningScraperName = scraper;
   const child = spawn("python3", [scriptPath], {

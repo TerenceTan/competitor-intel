@@ -4,6 +4,66 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [1.0.0] — 2026-03-31
+
+### UI/UX Overhaul
+- Unified color system: standardized all `slate-*` to `gray-*`, eliminated dual-palette inconsistency
+- Sidebar redesign: tinted active state (`bg-primary/10 text-primary`) instead of solid blue block, icon color treatment, nav divider, focus-visible rings
+- Mobile drawer: matching sidebar design, escape key handler, animations
+- Table headers: subtle `bg-gray-50/80` background for visual separation across all tables
+- Table rows: primary-tinted hover (`hover:bg-primary/[0.03]`) across all tables
+- All buttons: proper hover/active/focus states (`hover:bg-primary/90 active:bg-primary/80`)
+- Filter selects: hover border, focus ring with primary color
+- Cards: consistent hover shadow, primary-tinted border on hover
+- KPI stat cards: icon with tinted background (`bg-primary/10`)
+- Insight cards: improved "no insight" contrast (was `opacity-40`, now `bg-gray-50/50`)
+- Market cards: primary-themed hover instead of hardcoded blue
+- Focus rings: all interactive elements use `focus-visible:ring-primary/40`
+- Links: `hover:text-primary` instead of `hover:text-blue-600`
+- Login page: improved input focus ring, button states
+
+### Data Visualization (Recharts)
+- KPI sparkline stat cards on Executive Summary (competitors, changes, Trustpilot, promos)
+- Reputation radar chart on competitor detail (Trustpilot, MyFXBook, iOS, Android, WikiFX)
+- Social media horizontal bar chart on competitor detail
+- Changes activity timeline (14-day bar chart colored by severity)
+
+### Loading & Error States
+- Skeleton loading tables for competitors and changes pages
+- Error states with retry buttons
+- Dashboard-level error boundary (`error.tsx`)
+- Scraper run buttons with `Loader2` spinner
+
+### Accessibility
+- Skip-to-main-content link
+- `role="navigation"` and `aria-label` on nav elements
+- `aria-current="page"` on active nav links
+- `aria-label` on filter selects
+- `aria-haspopup="dialog"`, `aria-modal`, escape key handler on insight modal
+- Focus management: auto-focus close button on modal open
+- `scope="col"` on all table headers
+
+### Performance
+- Fixed N+1 database queries across 3 routes (competitors, insights, markets) using batch `SELECT MAX(id) GROUP BY` pattern
+- Replaced N×4 individual queries with 4 batch queries + O(1) lookup maps
+
+### Security
+- Timing-safe string comparison for auth tokens (Edge: XOR loop, Node: `crypto.timingSafeEqual`)
+- Password length limit (500 chars) to prevent DoS
+- Session timeout reduced from 7 days to 8 hours
+- Path traversal guard on scraper execution endpoint
+
+### Code Quality
+- Created `safeParseJson()` utility with dev-mode logging, replacing ~25 silent `catch {}` blocks
+- Extracted shared constants (`SCRAPERS`, `MARKET_FLAGS`, `PLATFORMS`) into `src/lib/constants.ts`
+- Deduplicated `SeverityBadge` into `src/components/shared/severity-badge.tsx`
+- Created shared components: `EmptyState`, `PageHeader`, `DataTable`
+- Response validation: `r.ok` checks before `.json()` on all fetch calls
+- BetaBar: fixed hydration with `useSyncExternalStore`, non-fixed positioning
+- Client-side pagination (20 items/page), mobile card views, sort indicators, diff-style changes
+
+---
+
 ## [Unreleased] — 2026-03-25 (Session 8: AI-Powered Pricing Scraper + QA & Security Audit)
 
 ### Added

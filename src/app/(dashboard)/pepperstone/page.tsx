@@ -15,19 +15,12 @@ import {
   TabsContent,
 } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
-import { formatDate, formatDateTime, timeAgo, extractMaxLeverage } from "@/lib/utils";
+import { formatDate, formatDateTime, timeAgo, extractMaxLeverage, safeParseJson } from "@/lib/utils";
 import { FlaskConical } from "lucide-react";
 
 const COMPETITOR_ID = "pepperstone";
 
-const PLATFORMS = [
-  "youtube",
-  "telegram",
-  "facebook",
-  "instagram",
-  "line",
-  "zalo",
-];
+import { PLATFORMS } from "@/lib/constants";
 
 function SentimentBadge({ sentiment }: { sentiment: string | null }) {
   const colorMap: Record<string, string> = {
@@ -123,13 +116,13 @@ export default async function PepperstoneBenchmarkPage() {
   let marketingStrategy: Array<{ title: string; description: string }> = [];
   let bizArea: string[] = [];
 
-  try { accountTypes = latestPricing?.accountTypesJson ? JSON.parse(latestPricing.accountTypesJson) : []; } catch {}
-  try { promotions = latestPromo?.promotionsJson ? JSON.parse(latestPromo.promotionsJson) : []; } catch {}
-  try { fundingMethods = latestPricing?.fundingMethodsJson ? JSON.parse(latestPricing.fundingMethodsJson) : []; } catch {}
-  try { entitiesBreakdown = latestReputation?.entitiesBreakdownJson ? JSON.parse(latestReputation.entitiesBreakdownJson) : []; } catch {}
-  try { wikifxAccounts = latestWikifx?.accountsJson ? JSON.parse(latestWikifx.accountsJson) : []; } catch {}
-  try { marketingStrategy = latestWikifx?.marketingStrategyJson ? JSON.parse(latestWikifx.marketingStrategyJson) : []; } catch {}
-  try { bizArea = latestWikifx?.bizAreaJson ? JSON.parse(latestWikifx.bizAreaJson) : []; } catch {}
+  accountTypes = safeParseJson(latestPricing?.accountTypesJson, [], "accountTypesJson");
+  promotions = safeParseJson(latestPromo?.promotionsJson, [], "promotionsJson");
+  fundingMethods = safeParseJson(latestPricing?.fundingMethodsJson, [], "fundingMethodsJson");
+  entitiesBreakdown = safeParseJson(latestReputation?.entitiesBreakdownJson, [], "entitiesBreakdownJson");
+  wikifxAccounts = safeParseJson(latestWikifx?.accountsJson, [], "accountsJson");
+  marketingStrategy = safeParseJson(latestWikifx?.marketingStrategyJson, [], "marketingStrategyJson");
+  bizArea = safeParseJson(latestWikifx?.bizAreaJson, [], "bizAreaJson");
 
   let wikifxMinDeposit: string | null = null;
   let wikifxMaxLeverage: string | null = null;
@@ -312,7 +305,7 @@ export default async function PepperstoneBenchmarkPage() {
                   <Card key={i} className="p-6 border-gray-200 bg-white flex flex-col gap-3">
                     <h4 className="text-gray-900 font-semibold text-sm leading-snug">{title}</h4>
                     {offerValue != null && (
-                      <p className="text-xl font-bold" style={{ color: "#0064FA" }}>{String(offerValue)}</p>
+                      <p className="text-xl font-bold text-primary">{String(offerValue)}</p>
                     )}
                     {description && (
                       <p className="text-gray-600 text-sm leading-relaxed">{description}</p>
@@ -320,7 +313,7 @@ export default async function PepperstoneBenchmarkPage() {
                     <div className="flex flex-wrap items-center gap-3 mt-auto pt-2 border-t border-gray-100">
                       {expiry && <span className="text-gray-400 text-xs">Expires: {String(expiry)}</span>}
                       {sourceUrl && (
-                        <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-medium hover:underline ml-auto" style={{ color: "#0064FA" }}>
+                        <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-medium hover:underline ml-auto text-primary">
                           View source →
                         </a>
                       )}
@@ -428,7 +421,7 @@ export default async function PepperstoneBenchmarkPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-200">
+                    <tr className="border-b border-gray-200 bg-gray-50/80">
                       {["Entity", "Trustpilot", "FPA", "MyFXBook", "App Store", "Google Play"].map((h) => (
                         <th key={h} className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">{h}</th>
                       ))}
@@ -476,7 +469,7 @@ export default async function PepperstoneBenchmarkPage() {
                     <SentimentBadge sentiment={item.sentiment} />
                     <div className="flex-1 min-w-0">
                       {item.url ? (
-                        <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-gray-800 text-sm font-medium hover:text-blue-600 transition-colors line-clamp-2 leading-snug">
+                        <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-gray-800 text-sm font-medium hover:text-primary transition-colors line-clamp-2 leading-snug">
                           {item.title}
                         </a>
                       ) : (

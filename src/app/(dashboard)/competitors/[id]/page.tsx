@@ -19,27 +19,11 @@ import {
   TabsContent,
 } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
-import { timeAgo, formatDate, formatDateTime, tierLabel, extractMaxLeverage } from "@/lib/utils";
+import { timeAgo, formatDate, formatDateTime, tierLabel, extractMaxLeverage, safeParseJson } from "@/lib/utils";
 import { CompetitorChangeTable } from "./change-table";
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const colorMap: Record<string, string> = {
-    critical: "bg-red-50 text-red-700 border-red-200",
-    high: "bg-orange-50 text-orange-700 border-orange-200",
-    medium: "bg-amber-50 text-amber-700 border-amber-200",
-    low: "bg-blue-50 text-blue-700 border-blue-200",
-  };
-  const cls =
-    colorMap[severity?.toLowerCase()] ??
-    "bg-gray-100 text-gray-600 border-gray-200";
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}
-    >
-      {severity ?? "unknown"}
-    </span>
-  );
-}
+import { ReputationRadar } from "@/components/charts/reputation-radar";
+import { SocialBarChart } from "@/components/charts/social-bar-chart";
+import { SeverityBadge } from "@/components/shared/severity-badge";
 
 function SentimentBadge({ sentiment }: { sentiment: string | null }) {
   const colorMap: Record<string, string> = {
@@ -58,14 +42,7 @@ function SentimentBadge({ sentiment }: { sentiment: string | null }) {
   );
 }
 
-const PLATFORMS = [
-  "youtube",
-  "telegram",
-  "facebook",
-  "instagram",
-  "line",
-  "zalo",
-];
+import { PLATFORMS } from "@/lib/constants";
 
 export default async function CompetitorDetailPage({
   params,
@@ -180,15 +157,15 @@ export default async function CompetitorDetailPage({
   let marketingStrategy: Array<{ title: string; description: string }> = [];
   let bizArea: string[] = [];
 
-  try { keyFindings = latestInsight?.keyFindingsJson ? JSON.parse(latestInsight.keyFindingsJson) : []; } catch {}
-  try { actions = latestInsight?.actionsJson ? JSON.parse(latestInsight.actionsJson) : []; } catch {}
-  try { accountTypes = latestPricing?.accountTypesJson ? JSON.parse(latestPricing.accountTypesJson) : []; } catch {}
-  try { promotions = latestPromo?.promotionsJson ? JSON.parse(latestPromo.promotionsJson) : []; } catch {}
-  try { fundingMethods = latestPricing?.fundingMethodsJson ? JSON.parse(latestPricing.fundingMethodsJson) : []; } catch {}
-  try { entitiesBreakdown = latestReputation?.entitiesBreakdownJson ? JSON.parse(latestReputation.entitiesBreakdownJson) : []; } catch {}
-  try { wikifxAccounts = latestWikifx?.accountsJson ? JSON.parse(latestWikifx.accountsJson) : []; } catch {}
-  try { marketingStrategy = latestWikifx?.marketingStrategyJson ? JSON.parse(latestWikifx.marketingStrategyJson) : []; } catch {}
-  try { bizArea = latestWikifx?.bizAreaJson ? JSON.parse(latestWikifx.bizAreaJson) : []; } catch {}
+  keyFindings = safeParseJson(latestInsight?.keyFindingsJson, [], "keyFindingsJson");
+  actions = safeParseJson(latestInsight?.actionsJson, [], "actionsJson");
+  accountTypes = safeParseJson(latestPricing?.accountTypesJson, [], "accountTypesJson");
+  promotions = safeParseJson(latestPromo?.promotionsJson, [], "promotionsJson");
+  fundingMethods = safeParseJson(latestPricing?.fundingMethodsJson, [], "fundingMethodsJson");
+  entitiesBreakdown = safeParseJson(latestReputation?.entitiesBreakdownJson, [], "entitiesBreakdownJson");
+  wikifxAccounts = safeParseJson(latestWikifx?.accountsJson, [], "accountsJson");
+  marketingStrategy = safeParseJson(latestWikifx?.marketingStrategyJson, [], "marketingStrategyJson");
+  bizArea = safeParseJson(latestWikifx?.bizAreaJson, [], "bizAreaJson");
 
   // Derive min deposit and max leverage from WikiFX accounts if available
   let wikifxMinDeposit: string | null = null;
@@ -242,7 +219,7 @@ export default async function CompetitorDetailPage({
             href={competitor.website}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-gray-500 hover:text-blue-600 transition-colors"
+            className="text-sm text-gray-500 hover:text-primary transition-colors"
           >
             {competitor.website}
           </a>
@@ -360,7 +337,7 @@ export default async function CompetitorDetailPage({
               <div title="Requires Anthropic API key">
                 <button
                   disabled
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-[#0064FA] text-white cursor-not-allowed opacity-50 border border-blue-600"
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white cursor-not-allowed opacity-50 border border-primary"
                 >
                   Regenerate Analysis
                 </button>
@@ -537,7 +514,7 @@ export default async function CompetitorDetailPage({
                       {title}
                     </h4>
                     {offerValue != null && (
-                      <p className="text-xl font-bold" style={{ color: "#0064FA" }}>
+                      <p className="text-xl font-bold text-primary">
                         {String(offerValue)}
                       </p>
                     )}
@@ -557,8 +534,7 @@ export default async function CompetitorDetailPage({
                           href={sourceUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs font-medium hover:underline ml-auto"
-                          style={{ color: "#0064FA" }}
+                          className="text-xs font-medium hover:underline ml-auto text-primary"
                         >
                           View source →
                         </a>
@@ -588,7 +564,15 @@ export default async function CompetitorDetailPage({
         </TabsContent>
 
         {/* Tab 4: Digital Presence */}
-        <TabsContent value="digital" className="mt-4">
+        <TabsContent value="digital" className="mt-4 space-y-6">
+          <Card className="p-6 border-gray-200 bg-white">
+            <h3 className="text-gray-900 font-semibold mb-4">Follower Comparison</h3>
+            <SocialBarChart
+              data={PLATFORMS
+                .filter((p) => socialMap[p]?.followers != null && socialMap[p]!.followers! > 0)
+                .map((p) => ({ platform: p.charAt(0).toUpperCase() + p.slice(1), followers: socialMap[p]!.followers! }))}
+            />
+          </Card>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {PLATFORMS.map((platform) => {
               const snap = socialMap[platform];
@@ -700,6 +684,17 @@ export default async function CompetitorDetailPage({
             ))}
           </div>
 
+          <Card className="p-6 border-gray-200 bg-white">
+            <h3 className="text-gray-900 font-semibold mb-4">Reputation Overview</h3>
+            <ReputationRadar
+              trustpilot={latestReputation?.trustpilotScore ?? null}
+              myfxbook={latestReputation?.myfxbookRating ?? null}
+              ios={latestReputation?.iosRating ?? null}
+              android={latestReputation?.androidRating ?? null}
+              wikifx={latestWikifx?.wikifxScore ?? null}
+            />
+          </Card>
+
           {entitiesBreakdown.length > 0 && (
             <Card className="border-gray-200 bg-white overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200">
@@ -708,7 +703,7 @@ export default async function CompetitorDetailPage({
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-200">
+                    <tr className="border-b border-gray-200 bg-gray-50/80">
                       {["Entity", "Trustpilot", "FPA", "MyFXBook", "App Store", "Google Play"].map((h) => (
                         <th
                           key={h}
@@ -776,7 +771,7 @@ export default async function CompetitorDetailPage({
                           href={item.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-gray-800 text-sm font-medium hover:text-blue-600 transition-colors line-clamp-2 leading-snug"
+                          className="text-gray-800 text-sm font-medium hover:text-primary transition-colors line-clamp-2 leading-snug"
                         >
                           {item.title}
                         </a>

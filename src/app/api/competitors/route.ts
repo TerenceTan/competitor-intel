@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeParseJson } from "@/lib/utils";
 import { db } from "@/db";
 import {
   competitors,
@@ -7,7 +8,7 @@ import {
   promoSnapshots,
   aiInsights,
 } from "@/db/schema";
-import { desc, eq, ne, or, isNull } from "drizzle-orm";
+import { eq, or, isNull, sql } from "drizzle-orm";
 
 export async function GET() {
   const allCompetitors = await db
@@ -15,91 +16,77 @@ export async function GET() {
     .from(competitors)
     .where(or(eq(competitors.isSelf, 0), isNull(competitors.isSelf)));
 
-  const results = await Promise.all(
-    allCompetitors.map(async (competitor) => {
-      // Latest pricing snapshot
-      const [pricing] = await db
-        .select()
-        .from(pricingSnapshots)
-        .where(eq(pricingSnapshots.competitorId, competitor.id))
-        .orderBy(desc(pricingSnapshots.snapshotDate), desc(pricingSnapshots.id))
-        .limit(1);
+  // Batch fetch latest snapshots for all competitors in 4 queries (not N*4)
+  const [latestPricing, latestReputation, latestPromos, latestInsights] = await Promise.all([
+    db
+      .select()
+      .from(pricingSnapshots)
+      .where(sql`${pricingSnapshots.id} IN (SELECT MAX(id) FROM pricing_snapshots GROUP BY competitor_id)`),
+    db
+      .select()
+      .from(reputationSnapshots)
+      .where(sql`${reputationSnapshots.id} IN (SELECT MAX(id) FROM reputation_snapshots GROUP BY competitor_id)`),
+    db
+      .select()
+      .from(promoSnapshots)
+      .where(sql`${promoSnapshots.id} IN (SELECT MAX(id) FROM promo_snapshots GROUP BY competitor_id)`),
+    db
+      .select()
+      .from(aiInsights)
+      .where(sql`${aiInsights.id} IN (SELECT MAX(id) FROM ai_insights GROUP BY competitor_id)`),
+  ]);
 
-      // Latest reputation snapshot
-      const [reputation] = await db
-        .select()
-        .from(reputationSnapshots)
-        .where(eq(reputationSnapshots.competitorId, competitor.id))
-        .orderBy(desc(reputationSnapshots.snapshotDate), desc(reputationSnapshots.id))
-        .limit(1);
+  // Index by competitor ID for O(1) lookup
+  const pricingMap = Object.fromEntries(latestPricing.map((p) => [p.competitorId, p]));
+  const reputationMap = Object.fromEntries(latestReputation.map((r) => [r.competitorId, r]));
+  const promoMap = Object.fromEntries(latestPromos.map((p) => [p.competitorId, p]));
+  const insightMap = Object.fromEntries(latestInsights.map((i) => [i.competitorId, i]));
 
-      // Latest promo snapshot — count promos
-      const [promo] = await db
-        .select()
-        .from(promoSnapshots)
-        .where(eq(promoSnapshots.competitorId, competitor.id))
-        .orderBy(desc(promoSnapshots.snapshotDate), desc(promoSnapshots.id))
-        .limit(1);
+  const results = allCompetitors.map((competitor) => {
+    const pricing = pricingMap[competitor.id];
+    const reputation = reputationMap[competitor.id];
+    const promo = promoMap[competitor.id];
+    const insight = insightMap[competitor.id];
 
-      let promoCount = 0;
-      if (promo?.promotionsJson) {
-        try {
-          const parsed = JSON.parse(promo.promotionsJson);
-          promoCount = Array.isArray(parsed) ? parsed.length : 0;
-        } catch {}
-      }
+    const parsedPromos = safeParseJson<unknown[]>(promo?.promotionsJson, [], "promotionsJson");
+    const promoCount = Array.isArray(parsedPromos) ? parsedPromos.length : 0;
 
-      // Latest AI insight
-      const [insight] = await db
-        .select()
-        .from(aiInsights)
-        .where(eq(aiInsights.competitorId, competitor.id))
-        .orderBy(desc(aiInsights.generatedAt))
-        .limit(1);
+    // Max leverage from latest pricing
+    let maxLeverage: number | null = null;
+    const lev = safeParseJson<Record<string, unknown> | null>(pricing?.leverageJson, null, "leverageJson");
+    if (typeof lev === "object" && lev !== null) {
+      const vals = (Object.values(lev) as unknown[])
+        .map((v) => {
+          if (typeof v === "number") return v;
+          if (typeof v === "string" && v.includes(":")) return parseInt(v.split(":")[1], 10);
+          return NaN;
+        })
+        .filter((v) => !isNaN(v as number)) as number[];
+      maxLeverage = vals.length > 0 ? Math.max(...vals) : null;
+    }
 
-      // Max leverage from latest pricing — values stored as ["1:200", "1:1000"]
-      let maxLeverage: number | null = null;
-      if (pricing?.leverageJson) {
-        try {
-          const lev = JSON.parse(pricing.leverageJson);
-          if (typeof lev === "object" && lev !== null) {
-            const vals = (Object.values(lev) as unknown[])
-              .map((v) => {
-                if (typeof v === "number") return v;
-                if (typeof v === "string" && v.includes(":")) return parseInt(v.split(":")[1], 10);
-                return NaN;
-              })
-              .filter((v) => !isNaN(v as number)) as number[];
-            maxLeverage = vals.length > 0 ? Math.max(...vals) : null;
-          }
-        } catch (e) {
-          console.error(`[competitors] Failed to parse leverage_json for ${competitor.id}:`, e);
-        }
-      }
-
-      return {
-        id: competitor.id,
-        name: competitor.name,
-        tier: competitor.tier,
-        website: competitor.website,
-        maxLeverage,
-        minDepositUsd: pricing?.minDepositUsd ?? null,
-        instrumentsCount: pricing?.instrumentsCount ?? null,
-        promoCount,
-        trustpilotScore: reputation?.trustpilotScore ?? null,
-        latestInsightSummary: insight?.summary ?? null,
-        latestInsightDate: insight?.generatedAt ?? null,
-        lastUpdated: [
-          pricing?.snapshotDate,
-          reputation?.snapshotDate,
-          promo?.snapshotDate,
-        ]
-          .filter(Boolean)
-          .sort()
-          .pop() ?? null,
-      };
-    })
-  );
+    return {
+      id: competitor.id,
+      name: competitor.name,
+      tier: competitor.tier,
+      website: competitor.website,
+      maxLeverage,
+      minDepositUsd: pricing?.minDepositUsd ?? null,
+      instrumentsCount: pricing?.instrumentsCount ?? null,
+      promoCount,
+      trustpilotScore: reputation?.trustpilotScore ?? null,
+      latestInsightSummary: insight?.summary ?? null,
+      latestInsightDate: insight?.generatedAt ?? null,
+      lastUpdated: [
+        pricing?.snapshotDate,
+        reputation?.snapshotDate,
+        promo?.snapshotDate,
+      ]
+        .filter(Boolean)
+        .sort()
+        .pop() ?? null,
+    };
+  });
 
   return NextResponse.json(results);
 }

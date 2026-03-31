@@ -12,6 +12,19 @@ async function deriveToken(password: string): Promise<string> {
     .join("");
 }
 
+/** Constant-time string comparison to prevent timing attacks. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+  let result = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -31,7 +44,7 @@ export async function middleware(request: NextRequest) {
   const authToken = request.cookies.get("auth_token")?.value;
   const expectedToken = await deriveToken(password);
 
-  if (authToken !== expectedToken) {
+  if (!authToken || !timingSafeEqual(authToken, expectedToken)) {
     // Return 401 JSON for API routes so programmatic clients get a clear signal
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

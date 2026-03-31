@@ -1,25 +1,26 @@
 import { db } from "@/db";
 import { aiInsights, competitors } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
-import { timeAgo } from "@/lib/utils";
+import { sql } from "drizzle-orm";
+import { timeAgo, safeParseJson } from "@/lib/utils";
 import { InsightModal } from "./insight-modal";
-import { FileText } from "lucide-react";
+import { FileText, Lightbulb } from "lucide-react";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export default async function InsightsPage() {
   const allCompetitors = await db.select().from(competitors);
 
-  // Latest insight per competitor
-  const latestInsights = await Promise.all(
-    allCompetitors.map(async (c) => {
-      const [insight] = await db
-        .select()
-        .from(aiInsights)
-        .where(eq(aiInsights.competitorId, c.id))
-        .orderBy(desc(aiInsights.generatedAt))
-        .limit(1);
-      return { competitor: c, insight: insight ?? null };
-    })
-  );
+  // Batch fetch latest insight per competitor in a single query
+  const latestInsightRows = await db
+    .select()
+    .from(aiInsights)
+    .where(sql`${aiInsights.id} IN (SELECT MAX(id) FROM ai_insights GROUP BY competitor_id)`);
+
+  const insightMap = Object.fromEntries(latestInsightRows.map((i) => [i.competitorId, i]));
+
+  const latestInsights = allCompetitors.map((c) => ({
+    competitor: c,
+    insight: insightMap[c.id] ?? null,
+  }));
 
   const withInsights = latestInsights.filter((i) => i.insight !== null);
   const withoutInsights = latestInsights.filter((i) => i.insight === null);
@@ -36,23 +37,17 @@ export default async function InsightsPage() {
 
       {/* Insight cards */}
       {withInsights.length === 0 ? (
-        <div
-          className="rounded-xl border border-gray-200 p-12 text-center text-gray-500 bg-white"
-        >
-          No AI insights generated yet. Configure your Anthropic API key to
-          enable AI analysis.
-        </div>
+        <EmptyState
+          icon={Lightbulb}
+          title="No AI insights generated yet"
+          description="Configure your Anthropic API key and run AI analysis to generate competitive insights."
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {withInsights.map(({ competitor, insight }) => {
             if (!insight) return null;
 
-            let keyFindings: Array<{ finding: string; severity: string }> = [];
-            try {
-              keyFindings = insight.keyFindingsJson
-                ? JSON.parse(insight.keyFindingsJson)
-                : [];
-            } catch {}
+            const keyFindings = safeParseJson<Array<{ finding: string; severity: string }>>(insight.keyFindingsJson, [], "keyFindingsJson");
 
             const topFinding = keyFindings[0];
             const severityColorMap: Record<string, string> = {
@@ -73,7 +68,7 @@ export default async function InsightsPage() {
                 keyFindings={keyFindings}
               >
                 <div
-                  className={`rounded-xl border border-gray-200 border-l-4 ${borderColor} p-5 cursor-pointer hover:bg-gray-50 transition-colors bg-white`}
+                  className={`rounded-xl border border-gray-200 border-l-4 ${borderColor} p-5 cursor-pointer hover:border-gray-300 hover:shadow-md active:shadow-sm transition-all bg-white`}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div>
@@ -110,7 +105,7 @@ export default async function InsightsPage() {
           {withoutInsights.map(({ competitor }) => (
             <div
               key={competitor.id}
-              className="rounded-xl border border-gray-200 border-l-4 border-l-gray-300 p-5 opacity-40 bg-white"
+              className="rounded-xl border border-gray-100 border-l-4 border-l-gray-200 p-5 bg-gray-50/50"
             >
               <div className="flex items-center justify-between mb-3">
                 <div>

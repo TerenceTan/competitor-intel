@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { timeAgo } from "@/lib/utils";
 import { X } from "lucide-react";
+import { SeverityBadge } from "@/components/shared/severity-badge";
+import { safeParseJson } from "@/lib/utils";
 
 interface Competitor {
   id: string;
@@ -26,25 +28,6 @@ interface KeyFinding {
   severity: string;
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
-  const colorMap: Record<string, string> = {
-    critical: "bg-red-50 text-red-700 border-red-200",
-    high: "bg-orange-50 text-orange-700 border-orange-200",
-    medium: "bg-amber-50 text-amber-700 border-amber-200",
-    low: "bg-blue-50 text-blue-700 border-blue-200",
-  };
-  const cls =
-    colorMap[severity?.toLowerCase()] ??
-    "bg-gray-100 text-gray-600 border-gray-200";
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cls}`}
-    >
-      {severity ?? "unknown"}
-    </span>
-  );
-}
-
 export function InsightModal({
   competitor,
   insight,
@@ -57,11 +40,9 @@ export function InsightModal({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  let actions: Array<{ action: string; urgency: string }> = [];
-  try {
-    actions = insight.actionsJson ? JSON.parse(insight.actionsJson) : [];
-  } catch {}
+  const actions = safeParseJson<Array<{ action: string; urgency: string }>>(insight.actionsJson, [], "actionsJson");
 
   const urgencyColors: Record<string, string> = {
     high: "text-orange-600",
@@ -69,12 +50,35 @@ export function InsightModal({
     low: "text-blue-600",
   };
 
+  const handleEscape = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape") setOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      document.addEventListener("keydown", handleEscape);
+      // Focus the close button when modal opens
+      closeButtonRef.current?.focus();
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [open, handleEscape]);
+
   return (
     <>
-      <div onClick={() => setOpen(true)}>{children}</div>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-left w-full"
+        aria-haspopup="dialog"
+      >
+        {children}
+      </button>
 
       {open && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`AI insight for ${competitor.name}`}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
           onClick={(e) => {
@@ -82,10 +86,10 @@ export function InsightModal({
           }}
         >
           <div
-            className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-xl"
+            className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-xl animate-in fade-in zoom-in-95 duration-200"
           >
             {/* Modal header */}
-            <div className="sticky top-0 flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+            <div className="sticky top-0 flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white rounded-t-2xl">
               <div>
                 <h2 className="text-gray-900 font-bold text-lg">
                   {competitor.name}
@@ -95,8 +99,10 @@ export function InsightModal({
                 </p>
               </div>
               <button
+                ref={closeButtonRef}
                 onClick={() => setOpen(false)}
                 className="text-gray-400 hover:text-gray-700 transition-colors"
+                aria-label="Close dialog"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -135,7 +141,7 @@ export function InsightModal({
                   <div className="space-y-2">
                     {keyFindings.map((f, i) => (
                       <div
-                        key={i}
+                        key={`finding-${i}-${f.severity}`}
                         className="flex items-start gap-3 p-3 rounded-lg bg-gray-50"
                       >
                         <SeverityBadge severity={f.severity} />
@@ -157,7 +163,7 @@ export function InsightModal({
                   <div className="space-y-2">
                     {actions.map((a, i) => (
                       <div
-                        key={i}
+                        key={`action-${i}-${a.urgency}`}
                         className="flex items-start gap-3 p-3 rounded-lg bg-gray-50"
                       >
                         <span

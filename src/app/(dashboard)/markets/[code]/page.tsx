@@ -5,26 +5,13 @@ import {
   pricingSnapshots,
   promoSnapshots,
 } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
-
-const MARKET_FLAGS: Record<string, string> = {
-  sg: "🇸🇬",
-  hk: "🇭🇰",
-  th: "🇹🇭",
-  vn: "🇻🇳",
-  id: "🇮🇩",
-  my: "🇲🇾",
-  jp: "🇯🇵",
-  mn: "🇲🇳",
-  in: "🇮🇳",
-  ph: "🇵🇭",
-  tw: "🇹🇼",
-  cn: "🇨🇳",
-};
+import { MARKET_FLAGS } from "@/lib/constants";
+import { safeParseJson } from "@/lib/utils";
 
 export default async function MarketDetailPage({
   params,
@@ -43,62 +30,47 @@ export default async function MarketDetailPage({
 
   const allCompetitors = await db.select().from(competitors);
 
-  // Get latest pricing for each competitor
-  const pricingData = await Promise.all(
-    allCompetitors.map(async (c) => {
-      const [pricing] = await db
-        .select()
-        .from(pricingSnapshots)
-        .where(eq(pricingSnapshots.competitorId, c.id))
-        .orderBy(desc(pricingSnapshots.snapshotDate), desc(pricingSnapshots.id))
-        .limit(1);
+  // Batch fetch latest pricing and promo snapshots (2 queries instead of 2*N)
+  const [latestPricingRows, latestPromoRows] = await Promise.all([
+    db
+      .select()
+      .from(pricingSnapshots)
+      .where(sql`${pricingSnapshots.id} IN (SELECT MAX(id) FROM pricing_snapshots GROUP BY competitor_id)`),
+    db
+      .select()
+      .from(promoSnapshots)
+      .where(sql`${promoSnapshots.id} IN (SELECT MAX(id) FROM promo_snapshots GROUP BY competitor_id)`),
+  ]);
 
-      let maxLeverage: number | null = null;
-      if (pricing?.leverageJson) {
-        try {
-          const lev = JSON.parse(pricing.leverageJson);
-          if (typeof lev === "object" && lev !== null) {
-            const vals = Object.values(lev)
-              .map((v) => {
-                if (typeof v === "number") return v;
-                if (typeof v === "string" && v.includes(":")) return parseInt(v.split(":")[1], 10);
-                return NaN;
-              })
-              .filter((v) => !isNaN(v));
-            maxLeverage = vals.length > 0 ? Math.max(...vals) : null;
-          }
-        } catch {}
-      }
+  const pricingByCompetitor = Object.fromEntries(latestPricingRows.map((p) => [p.competitorId, p]));
 
-      return {
-        competitor: c,
-        minDepositUsd: pricing?.minDepositUsd ?? null,
-        maxLeverage,
-      };
-    })
-  );
+  const pricingData = allCompetitors.map((c) => {
+    const pricing = pricingByCompetitor[c.id];
+    let maxLeverage: number | null = null;
+    const lev = safeParseJson<Record<string, unknown> | null>(pricing?.leverageJson, null, "leverageJson");
+    if (typeof lev === "object" && lev !== null) {
+      const vals = Object.values(lev)
+        .map((v) => {
+          if (typeof v === "number") return v;
+          if (typeof v === "string" && v.includes(":")) return parseInt(v.split(":")[1], 10);
+          return NaN;
+        })
+        .filter((v) => !isNaN(v));
+      maxLeverage = vals.length > 0 ? Math.max(...vals) : null;
+    }
+    return { competitor: c, minDepositUsd: pricing?.minDepositUsd ?? null, maxLeverage };
+  });
 
-  // Get latest promo snapshot per competitor and collect all promotions
+  // Collect all promotions from batch-fetched promo snapshots
   type PromoItem = { competitorId: string; promo: Record<string, unknown> };
   const marketPromos: PromoItem[] = [];
-
-  await Promise.all(
-    allCompetitors.map(async (c) => {
-      const [snap] = await db
-        .select()
-        .from(promoSnapshots)
-        .where(eq(promoSnapshots.competitorId, c.id))
-        .orderBy(desc(promoSnapshots.snapshotDate), desc(promoSnapshots.id))
-        .limit(1);
-      if (!snap?.promotionsJson) return;
-      try {
-        const promos: Array<Record<string, unknown>> = JSON.parse(snap.promotionsJson);
-        for (const promo of promos) {
-          marketPromos.push({ competitorId: c.id, promo });
-        }
-      } catch {}
-    })
-  );
+  for (const snap of latestPromoRows) {
+    if (!snap.promotionsJson) continue;
+    const promos = safeParseJson<Array<Record<string, unknown>>>(snap.promotionsJson, [], "promotionsJson");
+    for (const promo of promos) {
+      marketPromos.push({ competitorId: snap.competitorId, promo });
+    }
+  }
 
   const competitorMap = Object.fromEntries(allCompetitors.map((c) => [c.id, c]));
   const flag = MARKET_FLAGS[code.toLowerCase()] ?? "🌐";
@@ -174,7 +146,7 @@ export default async function MarketDetailPage({
         >
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
+              <tr className="border-b border-gray-200 bg-gray-50/80">
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
                   Competitor
                 </th>
@@ -193,15 +165,14 @@ export default async function MarketDetailPage({
               {pricingData.map(({ competitor, minDepositUsd, maxLeverage }, idx) => (
                 <tr
                   key={competitor.id}
-                  className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+                  className={`border-b border-gray-100 hover:bg-primary/[0.03] transition-colors ${
                     idx === pricingData.length - 1 ? "border-b-0" : ""
                   }`}
                 >
                   <td className="px-4 py-3">
                     <Link
                       href={`/competitors/${competitor.id}`}
-                      className="hover:underline font-medium"
-                      style={{ color: "#0064FA" }}
+                      className="font-medium text-primary hover:text-primary/80 transition-colors"
                     >
                       {competitor.name}
                     </Link>
@@ -255,13 +226,12 @@ export default async function MarketDetailPage({
               return (
                 <Card
                   key={i}
-                  className="p-5 border-gray-200 bg-white"
+                  className="p-5 border-gray-200 bg-white hover:shadow-sm transition-shadow"
                 >
                   <div className="flex items-start justify-between mb-2">
                     <Link
                       href={`/competitors/${competitorId}`}
-                      className="text-sm font-semibold hover:underline"
-                      style={{ color: "#0064FA" }}
+                      className="text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
                     >
                       {competitor?.name ?? competitorId}
                     </Link>
@@ -280,8 +250,7 @@ export default async function MarketDetailPage({
                       href={sourceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs mt-2 inline-block hover:underline"
-                      style={{ color: "#0064FA" }}
+                      className="text-xs mt-2 inline-block text-primary hover:text-primary/80 transition-colors"
                     >
                       View source →
                     </a>

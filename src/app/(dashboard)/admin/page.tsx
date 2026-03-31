@@ -5,21 +5,7 @@ import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { Terminal, Server, Settings } from "lucide-react";
 import { ScraperTable } from "@/components/admin/scraper-table";
-
-const SCRAPERS = [
-  { name: "pricing-scraper", dbName: "pricing_scraper", label: "Pricing Scraper", domain: "pricing" },
-  { name: "promo-scraper", dbName: "promo_scraper", label: "Promo Scraper", domain: "promotions" },
-  { name: "social-scraper", dbName: "social_scraper", label: "Social Scraper", domain: "social" },
-  {
-    name: "reputation-scraper",
-    dbName: "reputation_scraper",
-    label: "Reputation Scraper",
-    domain: "reputation",
-  },
-  { name: "wikifx-scraper", dbName: "wikifx_scraper", label: "WikiFX Scraper", domain: "wikifx" },
-  { name: "news-scraper", dbName: "news_scraper", label: "News Scraper", domain: "news" },
-  { name: "ai-analysis", dbName: "ai_analyzer", label: "AI Analysis", domain: "insights" },
-];
+import { SCRAPERS } from "@/lib/constants";
 
 export default async function AdminPage() {
   const allCompetitors = await db.select().from(competitors);
@@ -49,7 +35,7 @@ export default async function AdminPage() {
       {/* Scraper Status Table */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <Server className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <Server className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">Scraper Status</h2>
         </div>
 
@@ -59,7 +45,7 @@ export default async function AdminPage() {
       {/* System Logs */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <Terminal className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <Terminal className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">System Logs</h2>
         </div>
 
@@ -88,7 +74,7 @@ export default async function AdminPage() {
       {/* Competitor Config */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <Settings className="w-5 h-5" style={{ color: "#0064FA" }} />
+          <Settings className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold text-gray-900">
             Competitor Configuration
           </h2>
@@ -100,7 +86,7 @@ export default async function AdminPage() {
         >
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
+              <tr className="border-b border-gray-200 bg-gray-50/80">
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
                   ID
                 </th>
@@ -136,7 +122,7 @@ export default async function AdminPage() {
                       href={c.website}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-gray-500 hover:text-blue-600 text-xs transition-colors"
+                      className="text-gray-500 hover:text-primary text-xs transition-colors"
                     >
                       {c.website}
                     </a>

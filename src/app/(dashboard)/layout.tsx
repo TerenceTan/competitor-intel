@@ -3,8 +3,8 @@ import { competitors, scraperRuns } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileHeader } from "@/components/layout/mobile-header";
+import { BetaBar } from "@/components/layout/beta-bar";
 import { formatDateTime } from "@/lib/utils";
-import { FlaskConical } from "lucide-react";
 
 // Dashboard pages query the SQLite DB at render time — never prerender statically
 export const dynamic = "force-dynamic";
@@ -24,14 +24,19 @@ export default async function DashboardLayout({
   const lastUpdated = lastRun?.finishedAt ?? null;
 
   return (
-    <div className="flex min-h-screen bg-slate-50 pt-11">
-      {/* Notice bar */}
-      <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 border-b border-blue-200 text-blue-800 text-sm font-medium">
-        <FlaskConical className="w-4 h-4 shrink-0 text-blue-500" />
-        <span>
-          <strong>Beta:</strong> This dashboard is under active development. We are actively expanding the scraping module — more data and coverage will be included over the next few days.
-        </span>
-      </div>
+    <div className="flex flex-col min-h-screen bg-gray-50">
+      {/* Notice bar — dismissible */}
+      <BetaBar />
+
+      {/* Skip to main content */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-12 focus:left-4 focus:z-[60] focus:px-4 focus:py-2 focus:bg-white focus:text-primary focus:rounded-lg focus:shadow-lg focus:text-sm focus:font-medium"
+      >
+        Skip to main content
+      </a>
+
+      <div className="flex flex-1 min-w-0">
 
       <Sidebar competitorCount={competitorCount} />
 
@@ -49,17 +54,17 @@ export default async function DashboardLayout({
               </span>
             </span>
             <div
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: "#0064FA" }}
+              className="w-2 h-2 rounded-full bg-primary"
               title="Database connected"
             />
           </div>
         </header>
 
         {/* Main content */}
-        <main className="flex-1 p-4 md:p-6 overflow-auto">
+        <main id="main-content" className="flex-1 p-4 md:p-6 overflow-auto">
           {children}
         </main>
+      </div>
       </div>
     </div>
   );

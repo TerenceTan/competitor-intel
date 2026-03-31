@@ -89,6 +89,19 @@ export function severityToVariant(
   }
 }
 
+/** Safely parse JSON with fallback. Logs malformed data in development. */
+export function safeParseJson<T>(json: string | null | undefined, fallback: T, label?: string): T {
+  if (!json) return fallback;
+  try {
+    return JSON.parse(json);
+  } catch (e) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn(`[safeParseJson] Malformed JSON${label ? ` in ${label}` : ""}:`, e);
+    }
+    return fallback;
+  }
+}
+
 export function tierLabel(tier: number): string {
   switch (tier) {
     case 1:

@@ -12,7 +12,6 @@ import {
   Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 
 interface SidebarProps {
   competitorCount?: number;
@@ -28,6 +27,7 @@ const navItems = [
     label: "Competitors",
     href: "/competitors",
     icon: Building2,
+    showCount: true,
   },
   {
     label: "Markets",
@@ -44,6 +44,7 @@ const navItems = [
     href: "/insights",
     icon: Lightbulb,
   },
+  { divider: true } as const,
   {
     label: "Our Data",
     href: "/pepperstone",
@@ -66,55 +67,62 @@ export function Sidebar({ competitorCount }: SidebarProps) {
 
   return (
     <aside
-      className="hidden md:flex flex-col w-64 min-h-screen border-r border-slate-200 bg-white"
+      className="hidden md:flex flex-col w-64 min-h-screen border-r border-gray-200 bg-white"
     >
       {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
+      <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-200">
         <div
-          className="w-8 h-8 rounded-md flex items-center justify-center font-bold text-white text-sm shrink-0"
-          style={{ backgroundColor: "#0064FA" }}
+          className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white text-sm shrink-0 bg-primary"
         >
           P
         </div>
         <div>
-          <span className="text-slate-900 font-semibold text-sm block leading-tight">
+          <span className="text-gray-900 font-semibold text-sm block leading-tight">
             Pepperstone
           </span>
-          <span className="text-slate-500 text-xs">Competitor Intel</span>
+          <span className="text-gray-500 text-xs">Competitor Intel</span>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map((item) => {
+      <nav className="flex-1 px-3 py-4 space-y-0.5" role="navigation" aria-label="Main navigation">
+        {navItems.map((item, idx) => {
+          if ("divider" in item) {
+            return <div key={`div-${idx}`} className="my-3 border-t border-gray-100" />;
+          }
           const Icon = item.icon;
-          const active = isActive(item.href);
+          const active = isActive(item.href!);
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={item.href!}
+              aria-current={active ? "page" : undefined}
               className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                "group flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
                 active
-                  ? "text-white"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                  ? "bg-primary/10 text-primary"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100/80 active:bg-gray-200/60"
               )}
-              style={active ? { backgroundColor: "#0064FA" } : undefined}
             >
               <Icon
-                className="w-4 h-4 shrink-0"
+                className={cn(
+                  "w-[18px] h-[18px] shrink-0 transition-colors",
+                  active ? "text-primary" : "text-gray-400 group-hover:text-gray-600"
+                )}
               />
               <span className="flex-1">{item.label}</span>
-              {item.label === "Competitors" && competitorCount !== undefined && (
-                <Badge
-                  variant="outline"
+              {"showCount" in item && item.showCount && competitorCount !== undefined && (
+                <span
                   className={cn(
-                    "text-xs h-5",
-                    active ? "border-blue-400 text-blue-100" : "border-slate-300 text-slate-500"
+                    "text-[11px] font-semibold min-w-[20px] h-5 flex items-center justify-center rounded-md px-1.5 transition-colors",
+                    active
+                      ? "bg-primary/15 text-primary"
+                      : "bg-gray-100 text-gray-500 group-hover:bg-gray-200/80 group-hover:text-gray-600"
                   )}
                 >
                   {competitorCount}
-                </Badge>
+                </span>
               )}
             </Link>
           );
@@ -122,9 +130,9 @@ export function Sidebar({ competitorCount }: SidebarProps) {
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t border-slate-200">
-        <p className="text-slate-500 text-xs">APAC Marketing Team</p>
-        <p className="text-slate-400 text-xs mt-0.5">Internal Use Only</p>
+      <div className="px-6 py-4 border-t border-gray-200">
+        <p className="text-gray-500 text-xs font-medium">APAC Marketing Team</p>
+        <p className="text-gray-400 text-xs mt-0.5">Internal Use Only</p>
       </div>
     </aside>
   );

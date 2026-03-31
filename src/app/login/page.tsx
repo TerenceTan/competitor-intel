@@ -35,14 +35,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-md px-8">
         {/* Logo / Branding */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-3 mb-4">
             <div
-              className="w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white text-lg"
-              style={{ backgroundColor: "#0064FA" }}
+              className="w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white text-lg bg-primary"
             >
               P
             </div>
@@ -76,13 +75,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
-                className="w-full px-4 py-3 rounded-lg text-gray-900 placeholder-gray-400 text-sm outline-none transition-colors border border-gray-200 bg-white focus:border-blue-500"
-                onFocus={(e) => {
-                  e.target.style.borderColor = "#0064FA";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "#e5e7eb";
-                }}
+                className="w-full px-4 py-3 rounded-lg text-gray-900 placeholder-gray-400 text-sm outline-none transition-all border border-gray-200 bg-white focus:border-primary focus:ring-2 focus:ring-primary/20"
                 required
                 autoFocus
               />
@@ -97,8 +90,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || !password}
-              className="w-full py-3 rounded-lg font-semibold text-sm text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700"
-              style={{ backgroundColor: "#0064FA" }}
+              className="w-full py-3 rounded-lg font-semibold text-sm text-white transition-all bg-primary hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
             >
               {loading ? "Authenticating..." : "Enter Dashboard"}
             </button>
