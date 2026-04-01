@@ -10,9 +10,11 @@ interface StatCardProps {
   icon: LucideIcon;
   sparklineData?: { value: number }[];
   subtitle?: string;
+  iconBgClassName?: string;
+  iconClassName?: string;
 }
 
-export function StatCard({ title, value, icon: Icon, sparklineData, subtitle }: StatCardProps) {
+export function StatCard({ title, value, icon: Icon, sparklineData, subtitle, iconBgClassName, iconClassName }: StatCardProps) {
   return (
     <Card className="p-5 border-gray-200 bg-white hover:shadow-sm transition-shadow">
       <div className="flex items-start justify-between">
@@ -24,8 +26,8 @@ export function StatCard({ title, value, icon: Icon, sparklineData, subtitle }: 
           )}
         </div>
         <div className="flex flex-col items-end gap-2">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Icon className="w-[18px] h-[18px] text-primary" />
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${iconBgClassName ?? "bg-primary/10"}`}>
+            <Icon className={`w-[18px] h-[18px] ${iconClassName ?? "text-primary"}`} />
           </div>
           {sparklineData && sparklineData.length > 1 && (
             <div className="w-20 h-8">

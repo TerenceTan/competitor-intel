@@ -44,7 +44,7 @@ export function ChangesTimeline({ data }: ChangesTimelineProps) {
               const date = new Date(String(d) + "T00:00:00");
               return date.toLocaleDateString("en-AU", { month: "short", day: "numeric" });
             }}
-            contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: "12px" }}
+            contentStyle={{ borderRadius: "8px", border: "1px solid #e5e7eb", fontSize: "14px" }}
           />
           <Bar dataKey="count" radius={[3, 3, 0, 0]} barSize={16}>
             {data.map((entry, idx) => {

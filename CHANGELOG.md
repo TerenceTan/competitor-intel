@@ -4,6 +4,57 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [1.1.0] — 2026-04-01
+
+### Added
+
+- **Visual AI Overview tab** — `src/app/(dashboard)/competitors/[id]/page.tsx`
+  Replaced text-heavy AI Overview tab with a visual-first layout: 4 severity stat cards (critical/high/medium/low), 2 Recharts donut charts (findings by severity + actions by urgency), compact expandable finding rows with evidence (previously discarded `evidence` field now surfaced), Kanban-style actions board grouped by urgency (immediate/this week/this month), and collapsible summary + implications cards.
+
+- **New components:**
+  - `src/components/ai-overview/severity-cards.tsx` — 4-card severity count grid with colored icons
+  - `src/components/ai-overview/finding-row.tsx` — Compact finding row with expand/collapse for evidence
+  - `src/components/ai-overview/actions-kanban.tsx` — 3-column urgency Kanban board showing full action text
+  - `src/components/ai-overview/collapsible-text.tsx` — Line-clamped text with "Read more" toggle
+  - `src/components/charts/severity-donut.tsx` — Reusable Recharts donut chart with center label
+
+- **Account types scraper** — `scrapers/account_types_scraper.py`
+  Dedicated 3-layer scraper for detailed account type specifications (15+ fields per account). Layer 1: official broker pages via Playwright + Claude AI. Layer 2: help centre pages via HTTP + Claude AI. Layer 3: aggregator cross-check (TradingFinder + DailyForex). Includes per-field cross-source reconciliation with Claude Haiku for disagreements, change detection, and audit trail stored in `reconciliation_json` column.
+
+- **Account type snapshots DB table** — `src/db/schema.ts`, `scrapers/db_utils.py`
+  New `account_type_snapshots` table with `accounts_detailed_json`, `source_urls`, `extraction_method`, and `reconciliation_json` columns.
+
+- **UIUX review Claude skill** — `.claude/commands/uiux-review.md`
+  Custom slash command for auditing dashboard pages against a 5-criteria UX framework (information hierarchy, data presentation, visual design, content strategy, responsive/accessibility).
+
+- **`StatCard` customization** — `src/components/charts/stat-card.tsx`
+  Added `iconBgClassName` and `iconClassName` props to allow severity-colored icon backgrounds instead of default primary.
+
+### Changed
+
+- **Global font size upgrade** — `src/app/globals.css`
+  Bumped `--text-xs` from `0.8125rem` (13px) to `0.875rem` (14px) and `--text-sm` from `0.9375rem` (15px) to `1rem` (16px). All body text now meets the 16px minimum readability threshold.
+
+- **Eliminated sub-14px custom font sizes** — sidebar, mobile header, competitors page, severity donut
+  Replaced all `text-[10px]` (6 instances) and `text-[11px]` (2 instances) with `text-xs` (now 14px). Chart tooltip font sizes upgraded from 12px to 14px across 4 chart components.
+
+- **Increased spacing throughout** — layout, sidebar, insight cards, insight modal, finding rows
+  Main content padding `md:p-6` → `md:p-8`. Sidebar/mobile nav: `py-2` → `py-2.5`, `space-y-0.5` → `space-y-1`. Insight cards: `p-5` → `p-6`, increased internal margins. Modal findings/actions: `p-3` → `p-3.5`, `space-y-2` → `space-y-2.5`.
+
+- **Competitors table overhaul** — `src/app/(dashboard)/competitors/page.tsx`
+  Replaced "Latest AI Insight" and "Last Updated" columns with Spread, Instruments, and AI Findings (severity dots). Added `TrustpilotCell` (color-coded score + progress bar), `FindingDots`, and `FreshnessDot` components. Mobile cards show 3-column metric grid.
+
+- **Competitors API enriched** — `src/app/api/competitors/route.ts`
+  Added `spreadFrom`, `accountTypesCount`, and `findingCounts` fields. Removed `latestInsightSummary` and `latestInsightDate`.
+
+- **Insights page polish** — `src/app/(dashboard)/insights/page.tsx`, `insight-modal.tsx`
+  Cards sorted by highest severity first, summary preview shows first sentence only, severity dots in card footer. Modal: severity count bar, colored finding borders, urgency-tagged actions, increased spacing.
+
+- **Junk data display cleanup** — `src/app/(dashboard)/competitors/[id]/page.tsx`
+  Added `displayValue()` helper that converts null, empty, and verbose fallback strings ("Unable to determine", "Not available", etc.) to clean "—" dashes.
+
+---
+
 ## [1.0.0] — 2026-03-31
 
 ### UI/UX Overhaul

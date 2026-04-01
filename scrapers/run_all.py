@@ -25,6 +25,7 @@ LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 
 SCRIPTS = [
     "pricing_scraper.py",
+    "account_types_scraper.py",
     "promo_scraper.py",
     "social_scraper.py",
     "reputation_scraper.py",

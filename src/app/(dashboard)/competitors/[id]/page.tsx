@@ -9,6 +9,7 @@ import {
   newsItems,
   changeEvents,
   wikifxSnapshots,
+  accountTypeSnapshots,
 } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
@@ -23,7 +24,22 @@ import { timeAgo, formatDate, formatDateTime, tierLabel, extractMaxLeverage, saf
 import { CompetitorChangeTable } from "./change-table";
 import { ReputationRadar } from "@/components/charts/reputation-radar";
 import { SocialBarChart } from "@/components/charts/social-bar-chart";
-import { SeverityBadge } from "@/components/shared/severity-badge";
+import { EmptyState } from "@/components/shared/empty-state";
+import { SeverityDonut } from "@/components/charts/severity-donut";
+import { SeverityCards } from "@/components/ai-overview/severity-cards";
+import { FindingRow } from "@/components/ai-overview/finding-row";
+import { ActionsKanban } from "@/components/ai-overview/actions-kanban";
+import { CollapsibleText } from "@/components/ai-overview/collapsible-text";
+import { Lightbulb, Target } from "lucide-react";
+
+/** Display a data value or "—" for missing/junk. Catches nulls, empty strings, and verbose fallback text. */
+function displayValue(val: string | null | undefined): string {
+  if (val == null) return "—";
+  const s = val.trim();
+  if (!s || s === "-" || s === "--" || s === "—") return "—";
+  if (/^(unable to|not (available|specified|mentioned|found|provided)|n\/?a|unknown|none|varies|see |contact |check |no (data|info))$/i.test(s)) return "—";
+  return s;
+}
 
 function SentimentBadge({ sentiment }: { sentiment: string | null }) {
   const colorMap: Record<string, string> = {
@@ -69,6 +85,7 @@ export default async function CompetitorDetailPage({
     news,
     changes,
     latestWikifx,
+    latestAccountTypes,
   ] = await Promise.all([
     db
       .select()
@@ -129,10 +146,18 @@ export default async function CompetitorDetailPage({
       .orderBy(desc(wikifxSnapshots.snapshotDate), desc(wikifxSnapshots.id))
       .limit(1)
       .then((r) => r[0] ?? null),
+
+    db
+      .select()
+      .from(accountTypeSnapshots)
+      .where(eq(accountTypeSnapshots.competitorId, id))
+      .orderBy(desc(accountTypeSnapshots.snapshotDate), desc(accountTypeSnapshots.id))
+      .limit(1)
+      .then((r) => r[0] ?? null),
   ]);
 
   // Parse JSON fields
-  let keyFindings: Array<{ finding: string; severity: string }> = [];
+  let keyFindings: Array<{ finding: string; severity: string; evidence?: string }> = [];
   let actions: Array<{ action: string; urgency: string }> = [];
   let accountTypes: Array<Record<string, unknown>> = [];
   let promotions: Array<Record<string, unknown>> = [];
@@ -156,6 +181,28 @@ export default async function CompetitorDetailPage({
   }> = [];
   let marketingStrategy: Array<{ title: string; description: string }> = [];
   let bizArea: string[] = [];
+  let detailedAccounts: Array<{
+    account_name?: string;
+    account_category?: string;
+    min_deposit?: string;
+    spread_from?: string;
+    spread_type?: string;
+    commission?: string;
+    commission_structure?: string;
+    max_leverage?: string;
+    execution_type?: string;
+    min_lot_size?: string;
+    max_lot_size?: string;
+    platforms?: string[];
+    base_currencies?: string[];
+    margin_call_pct?: string;
+    stop_out_pct?: string;
+    swap_free_available?: boolean;
+    negative_balance_protection?: boolean;
+    instruments_count?: string;
+    target_audience?: string;
+    notes?: string;
+  }> = [];
 
   keyFindings = safeParseJson(latestInsight?.keyFindingsJson, [], "keyFindingsJson");
   actions = safeParseJson(latestInsight?.actionsJson, [], "actionsJson");
@@ -166,6 +213,7 @@ export default async function CompetitorDetailPage({
   wikifxAccounts = safeParseJson(latestWikifx?.accountsJson, [], "accountsJson");
   marketingStrategy = safeParseJson(latestWikifx?.marketingStrategyJson, [], "marketingStrategyJson");
   bizArea = safeParseJson(latestWikifx?.bizAreaJson, [], "bizAreaJson");
+  detailedAccounts = safeParseJson(latestAccountTypes?.accountsDetailedJson, [], "accountsDetailedJson");
 
   // Derive min deposit and max leverage from WikiFX accounts if available
   let wikifxMinDeposit: string | null = null;
@@ -195,12 +243,6 @@ export default async function CompetitorDetailPage({
     3: "bg-gray-100 text-gray-600 border-gray-200",
   };
   const tierCls = tierColors[competitor.tier] ?? tierColors[3];
-
-  const urgencyColors: Record<string, string> = {
-    high: "text-orange-600",
-    medium: "text-amber-600",
-    low: "text-blue-600",
-  };
 
   return (
     <div className="space-y-8 max-w-6xl">
@@ -248,105 +290,124 @@ export default async function CompetitorDetailPage({
         </TabsList>
 
         {/* Tab 1: AI Overview */}
-        <TabsContent value="overview" className="mt-6 space-y-6">
+        <TabsContent value="overview" className="mt-6 space-y-5">
           {!latestInsight ? (
-            <Card
-              className="p-8 border-gray-200 text-center text-gray-500 bg-white"
-            >
-              No AI insights generated yet.
-            </Card>
-          ) : (
-            <>
-              <Card
-                className="p-6 border-gray-200 bg-white"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-900 font-semibold">Summary</h3>
-                  <span className="text-gray-400 text-xs">
-                    Generated {timeAgo(latestInsight.generatedAt)}
-                  </span>
-                </div>
-                <p className="text-gray-700 leading-loose text-sm">
-                  {latestInsight.summary ?? "No summary available."}
+            <EmptyState
+              icon={Lightbulb}
+              title="No AI insights generated yet"
+              description="Run the AI analyzer to generate competitive intelligence for this broker."
+            />
+          ) : (() => {
+            const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+            const sortedFindings = [...keyFindings].sort(
+              (a, b) => (severityOrder[a.severity?.toLowerCase()] ?? 4) - (severityOrder[b.severity?.toLowerCase()] ?? 4)
+            );
+
+            const severityKeys = ["critical", "high", "medium", "low"] as const;
+            const severityLabels: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
+            const severityHex: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#f59e0b", low: "#3b82f6" };
+
+            const severityCounts: Record<string, number> = {};
+            for (const k of severityKeys) {
+              severityCounts[k] = keyFindings.filter((f) => f.severity?.toLowerCase() === k).length;
+            }
+
+            const severityDonutData = severityKeys
+              .filter((k) => severityCounts[k] > 0)
+              .map((k) => ({
+                label: severityLabels[k],
+                count: severityCounts[k],
+                color: severityHex[k],
+              }));
+
+            const urgencyDonutData = [
+              { key: "immediate", label: "Immediate", color: "#ef4444" },
+              { key: "this_week", label: "This Week", color: "#f97316" },
+              { key: "this_month", label: "This Month", color: "#3b82f6" },
+            ].map((u) => ({
+              label: u.label,
+              count: actions.filter((a) => a.urgency?.toLowerCase() === u.key).length,
+              color: u.color,
+            }));
+
+            return (
+              <>
+                {/* Row 1: Severity stat cards */}
+                <SeverityCards counts={severityCounts} />
+                <p className="text-xs text-gray-400 text-right -mt-3">
+                  Generated {timeAgo(latestInsight.generatedAt)}
                 </p>
-                {latestInsight.implications && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <p className="text-gray-500 text-xs uppercase tracking-wider mb-3">
-                      Implications for Pepperstone
-                    </p>
-                    <p className="text-gray-600 text-sm leading-loose">
-                      {latestInsight.implications}
-                    </p>
+
+                {/* Row 2: Donut charts */}
+                {(keyFindings.length > 0 || actions.length > 0) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {keyFindings.length > 0 && (
+                      <Card className="p-5 border-gray-200 bg-white">
+                        <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-3">Findings by Severity</p>
+                        <SeverityDonut
+                          data={severityDonutData}
+                          centerLabel="findings"
+                          centerValue={keyFindings.length}
+                        />
+                      </Card>
+                    )}
+                    {actions.length > 0 && (
+                      <Card className="p-5 border-gray-200 bg-white">
+                        <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-3">Actions by Urgency</p>
+                        <SeverityDonut
+                          data={urgencyDonutData}
+                          centerLabel="actions"
+                          centerValue={actions.length}
+                        />
+                      </Card>
+                    )}
                   </div>
                 )}
-              </Card>
 
-              {keyFindings.length > 0 && (
-                <Card
-                  className="p-6 border-gray-200 bg-white"
-                >
-                  <h3 className="text-gray-900 font-semibold mb-4">
-                    Key Findings
-                  </h3>
-                  <div className="space-y-3">
-                    {keyFindings.map((f, i) => (
-                      <div
-                        key={i}
-                        className="flex items-start gap-3 p-3 rounded-lg bg-gray-50"
-                      >
-                        <SeverityBadge severity={f.severity} />
-                        <p className="text-gray-700 text-sm flex-1">
-                          {f.finding}
-                        </p>
-                      </div>
-                    ))}
+                {/* Row 3: Key findings — compact expandable rows */}
+                {sortedFindings.length > 0 && (
+                  <Card className="p-4 border-gray-200 bg-white">
+                    <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-3">Key Findings</p>
+                    <div className="space-y-1">
+                      {sortedFindings.map((f, i) => (
+                        <FindingRow
+                          key={i}
+                          finding={f.finding}
+                          severity={f.severity}
+                          evidence={f.evidence}
+                        />
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Row 4: Actions kanban by urgency */}
+                {actions.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-3">Recommended Actions</p>
+                    <ActionsKanban actions={actions} />
                   </div>
-                </Card>
-              )}
+                )}
 
-              {actions.length > 0 && (
-                <Card
-                  className="p-6 border-gray-200 bg-white"
-                >
-                  <h3 className="text-gray-900 font-semibold mb-4">
-                    Recommended Actions
-                  </h3>
-                  <div className="space-y-3">
-                    {actions.map((a, i) => (
-                      <div
-                        key={i}
-                        className="flex items-start gap-3 p-3 rounded-lg bg-gray-50"
-                      >
-                        <span
-                          className={`text-xs font-semibold uppercase tracking-wider mt-0.5 ${
-                            urgencyColors[a.urgency?.toLowerCase()] ??
-                            "text-gray-500"
-                          }`}
-                        >
-                          {a.urgency}
-                        </span>
-                        <p className="text-gray-700 text-sm flex-1">
-                          {a.action}
-                        </p>
+                {/* Row 5: Summary + Implications (collapsed) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card className="p-5 border-gray-200 bg-white">
+                    <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-2">AI Summary</p>
+                    <CollapsibleText text={latestInsight.summary ?? "No summary available."} />
+                  </Card>
+                  {latestInsight.implications && (
+                    <Card className="p-5 border-gray-200 bg-primary/5 border-primary/15">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <Target className="w-3.5 h-3.5 text-primary" />
+                        <p className="text-primary text-xs font-semibold uppercase tracking-wider">Impact on Pepperstone</p>
                       </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              <div title="Requires Anthropic API key">
-                <button
-                  disabled
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white cursor-not-allowed opacity-50 border border-primary"
-                >
-                  Regenerate Analysis
-                </button>
-                <span className="text-gray-400 text-xs ml-3">
-                  Requires Anthropic API key
-                </span>
-              </div>
-            </>
-          )}
+                      <CollapsibleText text={latestInsight.implications} />
+                    </Card>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </TabsContent>
 
         {/* Tab 2: Pricing */}
@@ -435,9 +496,105 @@ export default async function CompetitorDetailPage({
                 </div>
               )}
 
-              {wikifxAccounts.length > 0 ? (
+              {detailedAccounts.length > 0 ? (
                 <Card className="p-6 border-gray-200 bg-white">
-                  <h3 className="text-gray-900 font-semibold mb-4">Account Types</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-gray-900 font-semibold">Account Types</h3>
+                    {latestAccountTypes && (
+                      <span className="text-gray-400 text-xs">
+                        Updated {formatDate(latestAccountTypes.snapshotDate)}
+                      </span>
+                    )}
+                  </div>
+                  <Tabs defaultValue={detailedAccounts[0]?.account_name ?? "0"}>
+                    <TabsList className="bg-gray-100 border border-gray-200 h-auto p-1 flex flex-wrap mb-4">
+                      {detailedAccounts.map((acc, i) => (
+                        <TabsTrigger key={i} value={acc.account_name ?? String(i)} className="text-xs">
+                          {acc.account_name ?? `Account ${i + 1}`}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    {detailedAccounts.map((acc, i) => (
+                      <TabsContent key={i} value={acc.account_name ?? String(i)}>
+                        {acc.account_category && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary mb-3">
+                            {acc.account_category.replace("_", " ")}
+                          </span>
+                        )}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                          {[
+                            { label: "Min Deposit", value: acc.min_deposit },
+                            { label: "Spread From", value: acc.spread_from },
+                            { label: "Commission", value: acc.commission },
+                            { label: "Max Leverage", value: acc.max_leverage },
+                            { label: "Execution", value: acc.execution_type },
+                            { label: "Min Lot", value: acc.min_lot_size },
+                            { label: "Margin Call", value: acc.margin_call_pct },
+                            { label: "Stop Out", value: acc.stop_out_pct },
+                          ].map((item) => {
+                            const display = displayValue(item.value);
+                            return (
+                              <div key={item.label} className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                                <p className="text-gray-500 text-xs mb-0.5">{item.label}</p>
+                                <p className={`text-sm font-medium ${display === "—" ? "text-gray-300" : "text-gray-900"}`}>{display}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          {acc.platforms && acc.platforms.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs w-24 shrink-0">Platforms</span>
+                              <div className="flex flex-wrap gap-1">
+                                {acc.platforms.map((p) => (
+                                  <span key={p} className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">{p}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {acc.base_currencies && acc.base_currencies.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs w-24 shrink-0">Currencies</span>
+                              <div className="flex flex-wrap gap-1">
+                                {acc.base_currencies.map((c) => (
+                                  <span key={c} className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">{c}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {acc.swap_free_available != null && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs w-24 shrink-0">Swap-Free</span>
+                              <span className={`text-xs font-medium ${acc.swap_free_available ? "text-green-600" : "text-gray-400"}`}>
+                                {acc.swap_free_available ? "Available" : "Not available"}
+                              </span>
+                            </div>
+                          )}
+                          {acc.negative_balance_protection != null && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs w-24 shrink-0">NBP</span>
+                              <span className={`text-xs font-medium ${acc.negative_balance_protection ? "text-green-600" : "text-gray-400"}`}>
+                                {acc.negative_balance_protection ? "Yes" : "No"}
+                              </span>
+                            </div>
+                          )}
+                          {acc.target_audience && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs w-24 shrink-0">For</span>
+                              <span className="text-gray-700 text-xs">{acc.target_audience}</span>
+                            </div>
+                          )}
+                          {acc.notes && (
+                            <p className="text-gray-400 text-xs italic mt-2">{acc.notes}</p>
+                          )}
+                        </div>
+                      </TabsContent>
+                    ))}
+                  </Tabs>
+                </Card>
+              ) : wikifxAccounts.length > 0 ? (
+                <Card className="p-6 border-gray-200 bg-white">
+                  <h3 className="text-gray-900 font-semibold mb-4">Account Types <span className="text-gray-400 text-xs font-normal">(via WikiFX)</span></h3>
                   <Tabs defaultValue={wikifxAccounts[0]?.name ?? "0"}>
                     <TabsList className="bg-gray-100 border border-gray-200 h-auto p-1 flex flex-wrap mb-4">
                       {wikifxAccounts.map((acc, i) => (
@@ -451,7 +608,7 @@ export default async function CompetitorDetailPage({
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
                             <thead>
-                              <tr className="bg-gray-50 border-b border-gray-200">
+                              <tr className="bg-gray-50/80 border-b border-gray-200">
                                 {["Spread (from)", "Max Leverage", "Min Deposit", "Currency", "Instruments"].map((h) => (
                                   <th key={h} className="text-left px-4 py-2 text-gray-500 font-medium text-xs uppercase tracking-wider">
                                     {h}
@@ -461,11 +618,11 @@ export default async function CompetitorDetailPage({
                             </thead>
                             <tbody>
                               <tr>
-                                <td className="px-4 py-3 text-gray-700">{acc.spread_from ?? "—"}</td>
-                                <td className="px-4 py-3 text-gray-700">{acc.max_leverage ?? "—"}</td>
-                                <td className="px-4 py-3 text-gray-700">{acc.min_deposit ?? "—"}</td>
-                                <td className="px-4 py-3 text-gray-700">{acc.currency ?? "—"}</td>
-                                <td className="px-4 py-3 text-gray-700">{acc.instruments ?? "—"}</td>
+                                <td className="px-4 py-3 text-gray-700">{displayValue(acc.spread_from)}</td>
+                                <td className="px-4 py-3 text-gray-700">{displayValue(acc.max_leverage)}</td>
+                                <td className="px-4 py-3 text-gray-700">{displayValue(acc.min_deposit)}</td>
+                                <td className="px-4 py-3 text-gray-700">{displayValue(acc.currency)}</td>
+                                <td className="px-4 py-3 text-gray-700">{displayValue(acc.instruments)}</td>
                               </tr>
                             </tbody>
                           </table>

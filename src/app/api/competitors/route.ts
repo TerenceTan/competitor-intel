@@ -65,6 +65,45 @@ export async function GET() {
       maxLeverage = vals.length > 0 ? Math.max(...vals) : null;
     }
 
+    // Spread from — extract lowest spread across all account types
+    let spreadFrom: string | null = null;
+    const spreadData = safeParseJson<Array<{ spread_from?: string; account_type?: string }>>(
+      pricing?.spreadJson, [], "spreadJson"
+    );
+    if (spreadData.length > 0) {
+      // Find the lowest numeric spread
+      let lowestSpread = Infinity;
+      let lowestText = "";
+      for (const s of spreadData) {
+        const raw = s.spread_from ?? "";
+        const numMatch = raw.match(/[\d.]+/);
+        if (numMatch) {
+          const num = parseFloat(numMatch[0]);
+          if (num < lowestSpread) {
+            lowestSpread = num;
+            lowestText = raw;
+          }
+        }
+      }
+      if (lowestSpread < Infinity) {
+        spreadFrom = lowestText;
+      }
+    }
+
+    // Account types count
+    const accountTypes = safeParseJson<unknown[]>(pricing?.accountTypesJson, [], "accountTypesJson");
+    const accountTypesCount = accountTypes.length;
+
+    // AI findings severity breakdown
+    const keyFindings = safeParseJson<Array<{ severity: string }>>(
+      insight?.keyFindingsJson, [], "keyFindingsJson"
+    );
+    const findingCounts: Record<string, number> = {};
+    for (const f of keyFindings) {
+      const sev = f.severity?.toLowerCase() ?? "low";
+      findingCounts[sev] = (findingCounts[sev] || 0) + 1;
+    }
+
     return {
       id: competitor.id,
       name: competitor.name,
@@ -73,10 +112,11 @@ export async function GET() {
       maxLeverage,
       minDepositUsd: pricing?.minDepositUsd ?? null,
       instrumentsCount: pricing?.instrumentsCount ?? null,
+      spreadFrom,
+      accountTypesCount,
       promoCount,
       trustpilotScore: reputation?.trustpilotScore ?? null,
-      latestInsightSummary: insight?.summary ?? null,
-      latestInsightDate: insight?.generatedAt ?? null,
+      findingCounts,
       lastUpdated: [
         pricing?.snapshotDate,
         reputation?.snapshotDate,

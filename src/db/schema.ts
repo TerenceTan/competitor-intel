@@ -76,6 +76,16 @@ export const wikifxSnapshots = sqliteTable("wikifx_snapshots", {
   bizAreaJson: text("biz_area_json"),
 });
 
+export const accountTypeSnapshots = sqliteTable("account_type_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  competitorId: text("competitor_id").notNull().references(() => competitors.id),
+  snapshotDate: text("snapshot_date").notNull(),
+  accountsDetailedJson: text("accounts_detailed_json"),
+  sourceUrls: text("source_urls"),
+  extractionMethod: text("extraction_method"),
+  reconciliationJson: text("reconciliation_json"),
+});
+
 export const newsItems = sqliteTable("news_items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   competitorId: text("competitor_id").notNull().references(() => competitors.id),

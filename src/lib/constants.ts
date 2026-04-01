@@ -1,6 +1,7 @@
 /** Scraper definitions used by admin and executive summary pages */
 export const SCRAPERS = [
   { name: "pricing-scraper", dbName: "pricing_scraper", label: "Pricing Scraper", domain: "pricing" },
+  { name: "account-types-scraper", dbName: "account_types_scraper", label: "Account Types Scraper", domain: "account_types" },
   { name: "promo-scraper", dbName: "promo_scraper", label: "Promo Scraper", domain: "promotions" },
   { name: "social-scraper", dbName: "social_scraper", label: "Social Scraper", domain: "social" },
   { name: "reputation-scraper", dbName: "reputation_scraper", label: "Reputation Scraper", domain: "reputation" },

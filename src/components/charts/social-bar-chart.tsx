@@ -38,7 +38,7 @@ export function SocialBarChart({ data }: SocialBarChartProps) {
           <YAxis
             type="category"
             dataKey="platform"
-            tick={{ fontSize: 12, fill: "#6b7280" }}
+            tick={{ fontSize: 14, fill: "#6b7280" }}
             axisLine={false}
             tickLine={false}
             width={80}

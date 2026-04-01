@@ -80,7 +80,7 @@ export function MobileHeader({ competitorCount }: { competitorCount?: number }) 
               </button>
             </div>
             {/* Nav */}
-            <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto" role="navigation" aria-label="Main navigation">
+            <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto" role="navigation" aria-label="Main navigation">
               {navItems.map((item, idx) => {
                 if ("divider" in item) {
                   return <div key={`div-${idx}`} className="my-3 border-t border-gray-100" />;
@@ -94,7 +94,7 @@ export function MobileHeader({ competitorCount }: { competitorCount?: number }) 
                     onClick={() => setOpen(false)}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "group flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+                      "group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
                       active
                         ? "bg-primary/10 text-primary"
@@ -111,7 +111,7 @@ export function MobileHeader({ competitorCount }: { competitorCount?: number }) 
                     {"showCount" in item && item.showCount && competitorCount !== undefined && (
                       <span
                         className={cn(
-                          "text-[11px] font-semibold min-w-[20px] h-5 flex items-center justify-center rounded-md px-1.5 transition-colors",
+                          "text-xs font-semibold min-w-[20px] h-5 flex items-center justify-center rounded-md px-1.5 transition-colors",
                           active
                             ? "bg-primary/15 text-primary"
                             : "bg-gray-100 text-gray-500 group-hover:bg-gray-200/80 group-hover:text-gray-600"

@@ -30,7 +30,7 @@ export function ReputationRadar({ trustpilot, myfxbook, ios, android, wikifx }: 
           <PolarGrid stroke="#e5e7eb" />
           <PolarAngleAxis
             dataKey="metric"
-            tick={{ fontSize: 12, fill: "#6b7280" }}
+            tick={{ fontSize: 14, fill: "#6b7280" }}
           />
           <Radar
             dataKey="value"

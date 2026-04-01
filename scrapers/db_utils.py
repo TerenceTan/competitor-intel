@@ -50,6 +50,27 @@ def get_db() -> sqlite3.Connection:
         except Exception:
             pass  # column already exists
 
+    # Additive migration: account_type_snapshots table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS account_type_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            competitor_id TEXT NOT NULL REFERENCES competitors(id),
+            snapshot_date TEXT NOT NULL,
+            accounts_detailed_json TEXT,
+            source_urls TEXT,
+            extraction_method TEXT,
+            reconciliation_json TEXT
+        )
+    """)
+    conn.commit()
+
+    # Additive migration: reconciliation_json column (for existing tables)
+    try:
+        conn.execute("ALTER TABLE account_type_snapshots ADD COLUMN reconciliation_json TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
