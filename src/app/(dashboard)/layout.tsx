@@ -48,7 +48,7 @@ export default async function DashboardLayout({
           <MobileHeader competitorCount={competitorCount} />
           <div className="flex items-center gap-4 text-sm text-gray-500">
             <span>
-              Last updated:{" "}
+              Data as of:{" "}
               <span className="text-gray-700">
                 {lastUpdated ? formatDateTime(lastUpdated) : "—"}
               </span>
