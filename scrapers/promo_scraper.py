@@ -46,8 +46,11 @@ try:
 except ImportError:
     pass
 
-from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA, SCRAPER_HEADERS
+from config import DELAY_BETWEEN_REQUESTS, SCRAPER_UA, SCRAPER_HEADERS
+from db_utils import get_all_brokers
+COMPETITORS = get_all_brokers()
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
+from market_config import PRIORITY_MARKETS, get_market_urls
 
 SCRAPER_NAME = "promo_scraper"
 
@@ -760,7 +763,7 @@ async def scrape_all():
     total_promos = sum(len(v) for cid, v in merged.items() if cid in target_ids)
     print(f"  {total_promos} unique promos across {brokers_with_promos} broker(s)")
 
-    # --- Store results ---
+    # --- Store results (global) ---
     conn = get_db()
     snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -770,31 +773,7 @@ async def scrape_all():
             continue
 
         promos = merged.get(cid, [])
-        try:
-            promos_json = json.dumps(promos)
-            conn.execute(
-                "DELETE FROM promo_snapshots WHERE competitor_id=? AND snapshot_date=?",
-                (cid, snapshot_date),
-            )
-            conn.execute(
-                """
-                INSERT INTO promo_snapshots (competitor_id, snapshot_date, promotions_json)
-                VALUES (?, ?, ?)
-                """,
-                (cid, snapshot_date, promos_json),
-            )
-            conn.commit()
-            total_records += 1
-
-            # Change detection
-            detect_change(conn, cid, "promos", "promo_count", str(len(promos)), "medium")
-            titles = json.dumps(sorted(p.get("title", "") for p in promos if p.get("title")))
-            detect_change(conn, cid, "promos", "promo_titles", titles, "medium")
-
-        except Exception as e:
-            msg = f"{cid} db: {e}"
-            print(f"  DB Error: {msg}")
-            error_summary.append(msg)
+        total_records += _store_promo_snapshot(conn, cid, snapshot_date, promos, "global", error_summary)
 
     conn.close()
 
@@ -806,5 +785,131 @@ async def scrape_all():
         print(f"Errors: {error_msg}")
 
 
+def _store_promo_snapshot(
+    conn, cid: str, snapshot_date: str, promos: list[dict], market_code: str = "global",
+    error_summary: list | None = None,
+) -> int:
+    """Store a promo snapshot row and run change detection. Returns 1 on success, 0 on error."""
+    try:
+        promos_json = json.dumps(promos)
+        conn.execute(
+            "DELETE FROM promo_snapshots WHERE competitor_id=? AND snapshot_date=? AND market_code=?",
+            (cid, snapshot_date, market_code),
+        )
+        conn.execute(
+            """
+            INSERT INTO promo_snapshots (competitor_id, snapshot_date, promotions_json, market_code)
+            VALUES (?, ?, ?, ?)
+            """,
+            (cid, snapshot_date, promos_json, market_code),
+        )
+        conn.commit()
+
+        # Change detection
+        detect_change(conn, cid, "promos", "promo_count", str(len(promos)), "medium", market_code=market_code)
+        titles = json.dumps(sorted(p.get("title", "") for p in promos if p.get("title")))
+        detect_change(conn, cid, "promos", "promo_titles", titles, "medium", market_code=market_code)
+
+        return 1
+    except Exception as e:
+        msg = f"{cid}[{market_code}] db: {e}"
+        print(f"  DB Error: {msg}")
+        if error_summary is not None:
+            error_summary.append(msg)
+        return 0
+
+
+async def scrape_markets():
+    """Scrape market-specific promo pages (Layer 1 only — aggregators are global)."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Promo scraper — market-specific mode")
+    parser.add_argument("--broker", type=str, help="Single broker ID")
+    parser.add_argument("--market", type=str, help="Single market code (e.g. sg)")
+    parser.add_argument("--markets", action="store_true", help="All priority APAC markets")
+    args = parser.parse_args()
+
+    brokers = [c for c in COMPETITORS if not c.get("is_self")]
+    if args.broker:
+        brokers = [c for c in brokers if c["id"] == args.broker]
+        if not brokers:
+            print(f"Unknown broker: {args.broker}")
+            return
+
+    markets_to_scrape = []
+    if args.market:
+        markets_to_scrape = [args.market]
+    elif args.markets:
+        markets_to_scrape = list(PRIORITY_MARKETS)
+    else:
+        # No market flags — run the global scrape
+        await scrape_all()
+        return
+
+    run_id = log_scraper_run(SCRAPER_NAME, "running")
+    total_records = 0
+    error_summary = []
+
+    client = _get_anthropic_client()
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent=SCRAPER_UA,
+            viewport={"width": 1280, "height": 900},
+            locale="en-US",
+        )
+        page = await context.new_page()
+        await page.route(
+            "**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf,mp4,webp}",
+            lambda r: r.abort(),
+        )
+
+        conn = get_db()
+        snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        for market_code in markets_to_scrape:
+            print(f"\n{'='*60}")
+            print(f"  Market: {market_code.upper()}")
+            print(f"{'='*60}")
+
+            for competitor in brokers:
+                cid = competitor["id"]
+                name = competitor["name"]
+                promo_url = competitor.get("promo_url")
+
+                # Check for market-specific promo URL override
+                market_urls = get_market_urls(cid, market_code)
+                if market_urls and market_urls.get("promo_url"):
+                    promo_url = market_urls["promo_url"]
+
+                if not promo_url:
+                    continue
+
+                print(f"\n[{name}][{market_code}] Scraping: {promo_url}")
+                try:
+                    market_comp = {**competitor, "promo_url": promo_url}
+                    promos = await extract_promos_with_claude(page, market_comp, client)
+                    print(f"  → {len(promos)} promo(s) extracted")
+                    total_records += _store_promo_snapshot(conn, cid, snapshot_date, promos, market_code, error_summary)
+                except Exception as e:
+                    msg = f"{name}[{market_code}]: {e}"
+                    print(f"  Error: {msg}")
+                    error_summary.append(msg)
+
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+
+        conn.close()
+        await browser.close()
+
+    status = "success" if not error_summary else "partial"
+    error_msg = "; ".join(error_summary) if error_summary else None
+    update_scraper_run(run_id, status, total_records, error_msg)
+    print(f"\nDone. Records: {total_records}. Status: {status}")
+
+
 if __name__ == "__main__":
-    asyncio.run(scrape_all())
+    # If --market or --markets flag is present, run market-specific mode
+    if "--market" in sys.argv or "--markets" in sys.argv:
+        asyncio.run(scrape_markets())
+    else:
+        asyncio.run(scrape_all())

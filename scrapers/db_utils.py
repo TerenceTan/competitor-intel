@@ -71,6 +71,22 @@ def get_db() -> sqlite3.Connection:
     except Exception:
         pass  # column already exists
 
+    # Additive migration: market_code column for market-level localisation
+    for table in ("pricing_snapshots", "promo_snapshots", "account_type_snapshots", "change_events"):
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN market_code TEXT NOT NULL DEFAULT 'global'")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
+    # Additive migration: scraper_config + market_config columns for DB-driven competitor config
+    for col in ("scraper_config", "market_config"):
+        try:
+            conn.execute(f"ALTER TABLE competitors ADD COLUMN {col} TEXT")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
@@ -133,9 +149,10 @@ def detect_change(
     field: str,
     new_value,
     severity: str,
+    market_code: str = "global",
 ) -> bool:
     """
-    Look up the most recent change_event for (competitor_id, domain, field).
+    Look up the most recent change_event for (competitor_id, domain, field, market_code).
     If new_value differs from old new_value (or no prior record exists), write
     a new change_event row and return True.  Otherwise return False.
 
@@ -148,15 +165,15 @@ def detect_change(
 
     new_str = json.dumps(new_value) if not isinstance(new_value, str) else new_value
 
-    # Fetch the most recent recorded value for this field
+    # Fetch the most recent recorded value for this field + market
     row = conn.execute(
         """
         SELECT new_value FROM change_events
-        WHERE competitor_id = ? AND domain = ? AND field_name = ?
+        WHERE competitor_id = ? AND domain = ? AND field_name = ? AND market_code = ?
         ORDER BY detected_at DESC
         LIMIT 1
         """,
-        (competitor_id, domain, field),
+        (competitor_id, domain, field, market_code),
     ).fetchone()
 
     old_str = row["new_value"] if row else None
@@ -166,8 +183,8 @@ def detect_change(
 
     conn.execute(
         """
-        INSERT INTO change_events (competitor_id, domain, field_name, old_value, new_value, severity, detected_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO change_events (competitor_id, domain, field_name, old_value, new_value, severity, detected_at, market_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             competitor_id,
@@ -177,6 +194,7 @@ def detect_change(
             new_str,
             severity,
             datetime.now(timezone.utc).isoformat(),
+            market_code,
         ),
     )
     conn.commit()
@@ -199,3 +217,52 @@ def upsert_competitor(conn: sqlite3.Connection, competitor: dict):
         },
     )
     conn.commit()
+
+
+def get_all_brokers() -> list:
+    """
+    Read all competitors from DB with their scraper_config JSON merged in.
+    Returns same dict shape as config.py ALL_BROKERS for backward compatibility.
+    Falls back to hardcoded config.py if scraper_config is empty.
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM competitors ORDER BY tier, name").fetchall()
+        brokers = []
+        for row in rows:
+            raw_config = row["scraper_config"]
+            if not raw_config:
+                # No DB config yet — skip (fallback handled by caller)
+                continue
+            config = json.loads(raw_config)
+            broker = {
+                "id": row["id"],
+                "name": row["name"],
+                "tier": row["tier"],
+                "website": row["website"],
+                "is_self": bool(row["is_self"]),
+                **config,
+            }
+            brokers.append(broker)
+        return brokers
+    finally:
+        conn.close()
+
+
+def get_market_urls_from_db(competitor_id: str, market_code: str):
+    """
+    Read market-specific URL config for a competitor from the DB.
+    Returns dict with "method" key, or None if not configured.
+    """
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT market_config FROM competitors WHERE id = ?",
+            (competitor_id,),
+        ).fetchone()
+        if not row or not row["market_config"]:
+            return None
+        market_config = json.loads(row["market_config"])
+        return market_config.get(market_code)
+    finally:
+        conn.close()

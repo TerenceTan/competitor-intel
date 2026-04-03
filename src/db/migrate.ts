@@ -165,6 +165,24 @@ export function runMigrations() {
     // Column already exists — ignore
   }
 
+  // market_code column — market-level localisation for APAC scraping
+  for (const table of ["pricing_snapshots", "promo_snapshots", "account_type_snapshots", "change_events"]) {
+    try {
+      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN market_code TEXT NOT NULL DEFAULT 'global'`);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
+  // scraper_config + market_config columns — DB-driven competitor configuration
+  for (const col of ["scraper_config", "market_config"]) {
+    try {
+      sqlite.exec(`ALTER TABLE competitors ADD COLUMN ${col} TEXT`);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
   // is_self column — identifies Pepperstone as the self-benchmark (not a competitor)
   try {
     sqlite.exec(`ALTER TABLE competitors ADD COLUMN is_self INTEGER NOT NULL DEFAULT 0`);

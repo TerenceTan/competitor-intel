@@ -40,8 +40,11 @@ try:
 except ImportError:
     pass
 
-from config import ALL_BROKERS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA, SCRAPER_HEADERS
+from config import DELAY_BETWEEN_REQUESTS, SCRAPER_UA, SCRAPER_HEADERS
+from db_utils import get_all_brokers
+ALL_BROKERS = get_all_brokers()
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
+from market_config import PRIORITY_MARKETS, get_market_urls
 
 SCRAPER_NAME = "account_types_scraper"
 
@@ -821,7 +824,7 @@ async def scrape_account_types(page, competitor: dict) -> dict:
 # Change detection for account types
 # ---------------------------------------------------------------------------
 
-def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], broker_name: str):
+def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], broker_name: str, market_code: str = "global"):
     """
     Compare new account types against previous snapshot and detect changes.
     Flags: new_account, removed_account, field_changed.
@@ -829,11 +832,11 @@ def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], 
     row = conn.execute(
         """
         SELECT accounts_detailed_json FROM account_type_snapshots
-        WHERE competitor_id = ?
+        WHERE competitor_id = ? AND market_code = ?
         ORDER BY snapshot_date DESC
         LIMIT 1
         """,
-        (competitor_id,),
+        (competitor_id, market_code),
     ).fetchone()
 
     if not row or not row["accounts_detailed_json"]:
@@ -851,14 +854,14 @@ def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], 
     for name_lower, acc in new_names.items():
         if name_lower not in old_names:
             acc_name = acc.get("account_name", name_lower)
-            detect_change(conn, competitor_id, "account_types", "new_account", acc_name, "high")
+            detect_change(conn, competitor_id, "account_types", "new_account", acc_name, "high", market_code=market_code)
             print(f"    [Change] New account type detected: {acc_name}")
 
     # Detect removed accounts
     for name_lower, acc in old_names.items():
         if name_lower not in new_names:
             acc_name = acc.get("account_name", name_lower)
-            detect_change(conn, competitor_id, "account_types", "removed_account", f"REMOVED: {acc_name}", "high")
+            detect_change(conn, competitor_id, "account_types", "removed_account", f"REMOVED: {acc_name}", "high", market_code=market_code)
             print(f"    [Change] Account type removed: {acc_name}")
 
     # Detect field changes for matching accounts
@@ -880,6 +883,7 @@ def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], 
                     f"{acc_name}.{field}",
                     f"{old_val} -> {new_val}",
                     severity,
+                    market_code=market_code,
                 )
                 print(f"    [Change] {acc_name}.{field}: '{old_val}' -> '{new_val}'")
 
@@ -888,7 +892,66 @@ def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], 
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def scrape_all(broker_filter: str | None = None):
+def _store_account_snapshot(
+    conn, cid: str, snapshot_date: str, data: dict, market_code: str = "global",
+    error_summary: list | None = None,
+) -> int:
+    """
+    Guard, DELETE+INSERT an account_type_snapshot row, run change detection,
+    and backfill pricing_snapshots. Returns 1 on success, 0 if skipped/error.
+    """
+    accounts = data.get("accounts", [])
+    if not accounts:
+        print(f"  WARNING: {cid}: no account types extracted — preserving existing record (market={market_code})")
+        if error_summary is not None:
+            error_summary.append(f"{cid}[{market_code}]: all layers empty, skipped upsert")
+        return 0
+
+    # Change detection before overwriting
+    _detect_account_changes(conn, cid, accounts, cid, market_code=market_code)
+
+    # Upsert snapshot
+    conn.execute(
+        "DELETE FROM account_type_snapshots WHERE competitor_id=? AND snapshot_date=? AND market_code=?",
+        (cid, snapshot_date, market_code),
+    )
+    conn.execute(
+        """
+        INSERT INTO account_type_snapshots
+            (competitor_id, snapshot_date, accounts_detailed_json, source_urls, extraction_method, reconciliation_json, market_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            cid,
+            snapshot_date,
+            json.dumps(accounts, ensure_ascii=False),
+            json.dumps(data.get("source_urls", [])),
+            data.get("method", "unknown"),
+            json.dumps(data.get("reconciliation", {})),
+            market_code,
+        ),
+    )
+    conn.commit()
+
+    # Also update the simpler account_types_json in pricing_snapshots for backward compat
+    account_names = [a.get("account_name") for a in accounts if a.get("account_name")]
+    if account_names:
+        conn.execute(
+            """
+            UPDATE pricing_snapshots
+            SET account_types_json = ?
+            WHERE competitor_id = ? AND market_code = ? AND snapshot_date = (
+                SELECT MAX(snapshot_date) FROM pricing_snapshots WHERE competitor_id = ? AND market_code = ?
+            )
+            """,
+            (json.dumps(account_names), cid, market_code, cid, market_code),
+        )
+        conn.commit()
+
+    return 1
+
+
+async def scrape_all(broker_filter: str | None = None, market_code: str = "global"):
     run_id = log_scraper_run(SCRAPER_NAME, "running")
     total_records = 0
     error_summary = []
@@ -919,61 +982,33 @@ async def scrape_all(broker_filter: str | None = None):
         for competitor in brokers:
             cid = competitor["id"]
             name = competitor["name"]
-            print(f"\n{'='*50}\nProcessing {name}...\n{'='*50}")
+            print(f"\n{'='*50}\nProcessing {name} [{market_code}]...\n{'='*50}")
 
             try:
-                data = await scrape_account_types(page, competitor)
+                if market_code == "global":
+                    data = await scrape_account_types(page, competitor)
+                else:
+                    # Market-specific: override account_urls if market config provides them
+                    market_urls = get_market_urls(cid, market_code)
+                    if market_urls and market_urls.get("method") == "url":
+                        pricing_url = market_urls.get("pricing_url")
+                        market_comp = {**competitor}
+                        if "account_urls" in market_urls:
+                            market_comp["account_urls"] = market_urls["account_urls"]
+                        elif pricing_url:
+                            market_comp["account_urls"] = [pricing_url]
+                        print(f"    [Market {market_code}] Direct URL: {market_comp.get('account_urls', [])}")
+                        data = await scrape_account_types(page, market_comp)
+                    else:
+                        print(f"    [Market {market_code}] Geo-proxy not supported for account types — skipping")
+                        await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+                        continue
 
-                accounts = data.get("accounts", [])
-                if not accounts:
-                    print(f"  WARNING: {name}: no account types extracted from any layer -- preserving existing record")
-                    error_summary.append(f"{name}: all layers empty, skipped upsert")
-                    await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
-                    continue
-
-                # Run change detection before overwriting
-                _detect_account_changes(conn, cid, accounts, name)
-
-                # Upsert snapshot
-                conn.execute(
-                    "DELETE FROM account_type_snapshots WHERE competitor_id=? AND snapshot_date=?",
-                    (cid, snapshot_date),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO account_type_snapshots
-                        (competitor_id, snapshot_date, accounts_detailed_json, source_urls, extraction_method, reconciliation_json)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        cid,
-                        snapshot_date,
-                        json.dumps(accounts, ensure_ascii=False),
-                        json.dumps(data.get("source_urls", [])),
-                        data.get("method", "unknown"),
-                        json.dumps(data.get("reconciliation", {})),
-                    ),
-                )
-                conn.commit()
-                total_records += 1
-
-                # Also update the simpler account_types_json in pricing_snapshots for backward compat
-                account_names = [a.get("account_name") for a in accounts if a.get("account_name")]
-                if account_names:
-                    conn.execute(
-                        """
-                        UPDATE pricing_snapshots
-                        SET account_types_json = ?
-                        WHERE competitor_id = ? AND snapshot_date = (
-                            SELECT MAX(snapshot_date) FROM pricing_snapshots WHERE competitor_id = ?
-                        )
-                        """,
-                        (json.dumps(account_names), cid, cid),
-                    )
-                    conn.commit()
+                if _store_account_snapshot(conn, cid, snapshot_date, data, market_code, error_summary):
+                    total_records += 1
 
             except Exception as e:
-                msg = f"{name}: {e}"
+                msg = f"{name}[{market_code}]: {e}"
                 print(f"    Error: {msg}")
                 error_summary.append(msg)
 
@@ -989,9 +1024,21 @@ async def scrape_all(broker_filter: str | None = None):
 
 
 if __name__ == "__main__":
-    broker = None
-    if "--broker" in sys.argv:
-        idx = sys.argv.index("--broker")
-        if idx + 1 < len(sys.argv):
-            broker = sys.argv[idx + 1]
-    asyncio.run(scrape_all(broker))
+    import argparse
+    parser = argparse.ArgumentParser(description="Account types scraper with market localisation")
+    parser.add_argument("--broker", type=str, help="Single broker ID (e.g. ic-markets)")
+    parser.add_argument("--market", type=str, help="Single market code (e.g. sg)")
+    parser.add_argument("--markets", action="store_true", help="All priority APAC markets after global")
+    args = parser.parse_args()
+
+    if args.market:
+        asyncio.run(scrape_all(args.broker, market_code=args.market))
+    elif args.markets:
+        async def _run_all_markets():
+            markets = ["global"] + list(PRIORITY_MARKETS)
+            for mc in markets:
+                print(f"\n{'='*60}\n  Market: {mc.upper()}\n{'='*60}")
+                await scrape_all(args.broker, market_code=mc)
+        asyncio.run(_run_all_markets())
+    else:
+        asyncio.run(scrape_all(args.broker))

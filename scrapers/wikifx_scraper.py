@@ -28,7 +28,9 @@ _PROJECT_ROOT = os.path.dirname(_SCRAPERS_DIR)
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
 
-from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA
+from config import DELAY_BETWEEN_REQUESTS, SCRAPER_UA
+from db_utils import get_all_brokers
+COMPETITORS = get_all_brokers()
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
 
 SCRAPER_NAME = "wikifx_scraper"

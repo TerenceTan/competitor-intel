@@ -7,6 +7,8 @@ export const competitors = sqliteTable("competitors", {
   website: text("website").notNull(),
   isSelf: integer("is_self").notNull().default(0),
   createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  scraperConfig: text("scraper_config"),
+  marketConfig: text("market_config"),
 });
 
 export const markets = sqliteTable("markets", {
@@ -33,6 +35,7 @@ export const pricingSnapshots = sqliteTable("pricing_snapshots", {
   minDepositSourcesJson: text("min_deposit_sources_json"),
   minDepositConfidence: text("min_deposit_confidence"),
   minDepositReconciliationJson: text("min_deposit_reconciliation_json"),
+  marketCode: text("market_code").notNull().default("global"),
 });
 
 export const promoSnapshots = sqliteTable("promo_snapshots", {
@@ -40,6 +43,7 @@ export const promoSnapshots = sqliteTable("promo_snapshots", {
   competitorId: text("competitor_id").notNull().references(() => competitors.id),
   snapshotDate: text("snapshot_date").notNull(),
   promotionsJson: text("promotions_json"),
+  marketCode: text("market_code").notNull().default("global"),
 });
 
 export const socialSnapshots = sqliteTable("social_snapshots", {
@@ -84,6 +88,7 @@ export const accountTypeSnapshots = sqliteTable("account_type_snapshots", {
   sourceUrls: text("source_urls"),
   extractionMethod: text("extraction_method"),
   reconciliationJson: text("reconciliation_json"),
+  marketCode: text("market_code").notNull().default("global"),
 });
 
 export const newsItems = sqliteTable("news_items", {
@@ -105,6 +110,7 @@ export const changeEvents = sqliteTable("change_events", {
   newValue: text("new_value"),
   severity: text("severity").notNull(),
   detectedAt: text("detected_at").notNull().default(new Date().toISOString()),
+  marketCode: text("market_code").notNull().default("global"),
 });
 
 export const aiInsights = sqliteTable("ai_insights", {

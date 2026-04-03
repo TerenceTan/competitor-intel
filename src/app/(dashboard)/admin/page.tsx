@@ -2,9 +2,9 @@ import { db } from "@/db";
 import { competitors, scraperRuns } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { Card } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils";
 import { Terminal, Server, Settings } from "lucide-react";
 import { ScraperTable } from "@/components/admin/scraper-table";
+import { CompetitorTable } from "@/components/admin/competitor-table";
 import { SCRAPERS } from "@/lib/constants";
 
 export default async function AdminPage() {
@@ -78,63 +78,9 @@ export default async function AdminPage() {
           <h2 className="text-lg font-semibold text-gray-900">
             Competitor Configuration
           </h2>
-          <span className="text-gray-400 text-xs">(read-only)</span>
         </div>
 
-        <Card
-          className="border-gray-200 overflow-hidden bg-white"
-        >
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50/80">
-                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
-                  ID
-                </th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
-                  Name
-                </th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
-                  Tier
-                </th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
-                  Website
-                </th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wider">
-                  Added
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {allCompetitors.map((c, idx) => (
-                <tr
-                  key={c.id}
-                  className={`border-b border-gray-100 ${
-                    idx === allCompetitors.length - 1 ? "border-b-0" : ""
-                  }`}
-                >
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                    {c.id}
-                  </td>
-                  <td className="px-4 py-3 text-gray-900 font-medium">{c.name}</td>
-                  <td className="px-4 py-3 text-gray-500">Tier {c.tier}</td>
-                  <td className="px-4 py-3">
-                    <a
-                      href={c.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-gray-500 hover:text-primary text-xs transition-colors"
-                    >
-                      {c.website}
-                    </a>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">
-                    {formatDate(c.createdAt)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+        <CompetitorTable competitors={allCompetitors} />
       </section>
     </div>
   );

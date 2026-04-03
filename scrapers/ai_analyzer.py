@@ -25,7 +25,8 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env.local"))
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
 
-from config import COMPETITORS
+from db_utils import get_all_brokers
+COMPETITORS = [b for b in get_all_brokers() if not b.get("is_self")]
 from db_utils import get_db, log_scraper_run, update_scraper_run
 
 SCRAPER_NAME = "ai_analyzer"

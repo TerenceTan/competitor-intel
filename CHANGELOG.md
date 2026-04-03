@@ -4,6 +4,50 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [1.2.0] — 2026-04-03
+
+### Added
+
+- **Admin UI for competitor management** — `src/app/(dashboard)/admin/page.tsx`, `src/components/admin/competitor-table.tsx`, `src/components/admin/competitor-form.tsx`, `src/app/(dashboard)/admin/actions.ts`
+  Replaced the read-only competitor config table with a full CRUD interface. "Add Competitor" button opens a dialog with a 2-step Smart Add flow: Step 1 asks for name + website only, then auto-detects URLs, social handles, WikiFX ID, app store IDs, and Trustpilot slug by scraping the broker homepage and searching external platforms. Step 2 shows a pre-filled review form with green highlights on auto-discovered fields. Edit (pencil icon) and Delete (trash icon with confirmation) actions per row. Key-based remount pattern ensures form state resets correctly when switching between competitors.
+
+- **DB-driven competitor config** — `src/db/schema.ts`, `src/db/migrate.ts`, `scrapers/db_utils.py`
+  Added `scraper_config TEXT` and `market_config TEXT` JSON columns to the `competitors` table. All scraper metadata (URLs, social handles, entities, research slugs) is now stored in the DB instead of hardcoded in `config.py`. Added `get_all_brokers()` and `get_market_urls_from_db()` helper functions to `db_utils.py` that reconstruct the same dict shape scrapers expect.
+
+- **Scraper cutover to DB config** — all 8 scrapers + `ai_analyzer.py`
+  All scrapers now import `get_all_brokers()` from `db_utils` instead of `ALL_BROKERS` from `config.py`. `market_config.py` reads from DB first with fallback to hardcoded URLs. `config.py` retained for global settings (`DELAY_BETWEEN_REQUESTS`, `SCRAPER_UA`, `SCRAPER_HEADERS`).
+
+- **Auto-discovery server action** — `src/app/(dashboard)/admin/actions.ts`
+  `discoverCompetitorConfig()` fetches the broker homepage to extract social links (Facebook, Instagram, X, YouTube) and key page URLs (pricing, promotions, account types) from HTML. Searches iTunes API for iOS app ID and Android package. Searches WikiFX for broker ID. Generates Trustpilot and research slugs from domain/name.
+
+- **Backfill script** — `scrapers/backfill_config_to_db.py`
+  One-time script that reads existing hardcoded config from `config.py` and `market_config.py`, serializes to JSON, and writes to the `scraper_config` and `market_config` DB columns for all 11 competitors.
+
+- **Market-level localisation** — `scrapers/market_config.py`, `src/app/(dashboard)/markets/[code]/page.tsx`, `src/app/(dashboard)/markets/page.tsx`
+  Added `market_code TEXT NOT NULL DEFAULT 'global'` column to 4 snapshot tables. 9 priority APAC markets (SG, MY, TH, VN, ID, HK, TW, CN, MN) with per-competitor URL overrides. Market detail page shows market-specific data with global fallback, data source badges, leverage bars, KPI cards, collapsible account types accordion, and recent changes feed. Markets index shows coverage indicators per market.
+
+- **Collapsible account types accordion** — `src/components/shared/account-accordion.tsx`
+  Replaced inline account type cards on market detail page with a collapsible accordion. Each competitor row is collapsed by default showing account count; expands to a table with Account, Min Deposit, Leverage, Spread, and Commission columns.
+
+### Fixed
+
+- **"Unable to determine" junk values in account data** — `src/app/(dashboard)/markets/[code]/page.tsx`
+  Added `sanitiseAccounts()` that regex-matches "Unable to determine", "Not available", "Not specified", and "N/A" strings and converts them to null (displayed as "—"). Affects Exness and FxPro data.
+
+- **MiniKpi divide-by-zero** — `src/app/(dashboard)/markets/[code]/page.tsx`
+  Added `totalCompetitors > 0` guard before division in coverage color calculation.
+
+- **LeverageBar negative value** — `src/app/(dashboard)/markets/[code]/page.tsx`
+  Added `Math.max(..., 0)` to clamp percentage at 0 minimum.
+
+- **Market code input validation** — `src/app/(dashboard)/markets/[code]/page.tsx`
+  Added regex allowlist (`/^[a-z]{2,5}$/`) that rejects malformed route params before any DB query.
+
+- **Competitor form stale state on edit** — `src/components/admin/competitor-form.tsx`
+  Extracted inner form to `CompetitorFormInner` with key-based remount so clicking Edit on different competitors correctly resets all form fields.
+
+---
+
 ## [1.1.0] — 2026-04-01
 
 ### Added

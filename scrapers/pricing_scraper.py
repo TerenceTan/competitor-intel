@@ -38,9 +38,12 @@ try:
 except ImportError:
     pass
 
-from config import ALL_BROKERS as COMPETITORS, DELAY_BETWEEN_REQUESTS, SCRAPER_UA  # type: ignore[import]
+from config import DELAY_BETWEEN_REQUESTS, SCRAPER_UA  # type: ignore[import]
+from db_utils import get_all_brokers  # type: ignore[import]
+COMPETITORS = get_all_brokers()
 from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change  # type: ignore[import]
 from wikifx_scraper import _fetch, _extract_accounts_from_html  # type: ignore[import]
+from market_config import PRIORITY_MARKETS, get_market_urls, get_scraperapi_country_code  # type: ignore[import]
 
 SCRAPER_NAME = "pricing_scraper"
 
@@ -836,7 +839,245 @@ async def scrape_pricing(page, competitor: dict) -> dict:
     return result
 
 
+def _store_pricing_snapshot(
+    conn, cid: str, snapshot_date: str, data: dict, market_code: str = "global"
+) -> bool:
+    """
+    Guard, DELETE+INSERT a pricing_snapshot row, and run change detection.
+    Returns True if a record was written, False if skipped.
+    """
+    name = cid  # for log messages
+
+    # Guard: skip upsert if extraction returned nothing useful
+    has_data = (
+        data.get("min_deposit_usd") is not None
+        or bool(data.get("leverage"))
+        or bool(data.get("account_types"))
+        or data.get("instruments_count") is not None
+        or bool(data.get("spread_json"))
+    )
+    if not has_data:
+        print(f"  ⚠ {name}: no pricing data extracted — preserving existing record (market={market_code})")
+        return False
+
+    leverage_json = json.dumps(data["leverage"])
+    account_types_json = json.dumps(data["account_types"])
+    funding_methods_json = json.dumps(data["funding_methods"])
+    spread_json = json.dumps(data["spread_json"]) if data.get("spread_json") else None
+    leverage_sources_json = json.dumps(data.get("leverage_sources", {}))
+    leverage_confidence = data.get("leverage_confidence")
+    leverage_reconciliation_json = json.dumps(data.get("leverage_reconciliation", {}))
+    min_deposit_sources_json = json.dumps(data.get("min_deposit_sources", {}))
+    min_deposit_confidence = data.get("min_deposit_confidence")
+    min_deposit_reconciliation_json = json.dumps(data.get("min_deposit_reconciliation", {}))
+
+    conn.execute(
+        "DELETE FROM pricing_snapshots WHERE competitor_id=? AND snapshot_date=? AND market_code=?",
+        (cid, snapshot_date, market_code),
+    )
+    conn.execute(
+        """
+        INSERT INTO pricing_snapshots
+            (competitor_id, snapshot_date, leverage_json, account_types_json,
+             min_deposit_usd, instruments_count, funding_methods_json, spread_json,
+             leverage_sources_json, leverage_confidence, leverage_reconciliation_json,
+             min_deposit_sources_json, min_deposit_confidence, min_deposit_reconciliation_json,
+             market_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            cid,
+            snapshot_date,
+            leverage_json,
+            account_types_json,
+            data["min_deposit_usd"],
+            data["instruments_count"],
+            funding_methods_json,
+            spread_json,
+            leverage_sources_json,
+            leverage_confidence,
+            leverage_reconciliation_json,
+            min_deposit_sources_json,
+            min_deposit_confidence,
+            min_deposit_reconciliation_json,
+            market_code,
+        ),
+    )
+    conn.commit()
+
+    # Change detection (scoped to market)
+    if data["min_deposit_usd"] is not None:
+        detect_change(
+            conn, cid, "pricing", "min_deposit_usd",
+            str(data["min_deposit_usd"]), "high", market_code=market_code,
+        )
+    if data["leverage"]:
+        try:
+            lev_vals = [
+                int(lev.split(":")[1])
+                for lev in data["leverage"]
+                if ":" in lev and lev.split(":")[1].isdigit()
+            ]
+            max_lev = max(lev_vals) if lev_vals else None
+            if max_lev:
+                detect_change(conn, cid, "pricing", "max_leverage", str(max_lev), "high", market_code=market_code)
+        except Exception as lev_err:
+            print(f"    [Change detection] Leverage parse error for {name}: {lev_err}")
+    if data.get("spread_json"):
+        detect_change(conn, cid, "pricing", "spread_json", json.dumps(data["spread_json"]), "medium", market_code=market_code)
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Market-aware scraping helpers
+# ---------------------------------------------------------------------------
+
+async def _fetch_via_scraperapi(url: str, country_code: str) -> str:
+    """
+    Fetch a URL through ScraperAPI with geo-targeting.
+    Returns the page HTML or raises on failure.
+    """
+    import aiohttp  # type: ignore[import]
+
+    api_key = os.environ.get("SCRAPERAPI_KEY") or os.environ.get("SCRAPER_API_KEY")
+    if not api_key:
+        raise RuntimeError("SCRAPERAPI_KEY not set")
+
+    params = {
+        "api_key": api_key,
+        "url": url,
+        "render": "true",
+        "premium": "true",
+        "country_code": country_code,
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "https://api.scraperapi.com/",
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=90),
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"ScraperAPI returned HTTP {resp.status}")
+            return await resp.text()
+
+
+async def scrape_market(page, competitor: dict, market_code: str) -> dict:
+    """
+    Scrape pricing for one competitor in one market.
+    Uses direct URL if available, otherwise falls back to ScraperAPI geo-proxy.
+    """
+    market_urls = get_market_urls(competitor["id"], market_code)
+    name = competitor["name"]
+
+    if market_urls and market_urls.get("method") == "url":
+        # Direct: create a modified competitor dict with market-specific URLs
+        pricing_url = market_urls.get("pricing_url", competitor.get("pricing_url"))
+        market_comp = {**competitor, "pricing_url": pricing_url}
+        # If market config has account_urls override, use them; otherwise just use the pricing URL
+        if "account_urls" in market_urls:
+            market_comp["account_urls"] = market_urls["account_urls"]
+        else:
+            market_comp["account_urls"] = [pricing_url]
+        print(f"    [Market {market_code}] Direct URL: {pricing_url}")
+        return await scrape_pricing(page, market_comp)
+    else:
+        # Geo-proxy fallback via ScraperAPI
+        cc = get_scraperapi_country_code(market_code)
+        if not cc:
+            print(f"    [Market {market_code}] No ScraperAPI country code — skipping")
+            return {}
+        return await _scrape_pricing_geo(competitor, cc)
+
+
+async def _scrape_pricing_geo(competitor: dict, country_code: str) -> dict:
+    """
+    Scrape pricing via ScraperAPI geo-proxy (for markets without direct URLs).
+    Uses the broker's global pricing_url but fetched through a geo-targeted proxy.
+    """
+    name = competitor["name"]
+    account_urls = competitor.get("account_urls") or [competitor["pricing_url"]]
+
+    combined_text = ""
+    for url in account_urls[:2]:  # Limit to 2 URLs to conserve ScraperAPI credits
+        try:
+            print(f"    [Geo-proxy {country_code}] Fetching {url}")
+            html = await _fetch_via_scraperapi(url, country_code)
+            # Extract text from HTML (crude but effective for Claude extraction)
+            import re as _re
+            text = _re.sub(r'<[^>]+>', ' ', html)
+            text = _re.sub(r'\s+', ' ', text)
+            combined_text += "\n\n" + text
+        except Exception as e:
+            print(f"    [Geo-proxy {country_code}] Error fetching {url}: {e}")
+
+    if not combined_text.strip():
+        return {}
+
+    # Use Claude to extract structured data from the geo-proxied page
+    result: dict[str, object] = {
+        "min_deposit_usd": None,
+        "leverage": [],
+        "account_types": [],
+        "instruments_count": None,
+        "funding_methods": [],
+        "spread_json": [],
+        "leverage_sources": {},
+        "leverage_confidence": None,
+        "leverage_reconciliation": {},
+        "min_deposit_sources": {},
+        "min_deposit_confidence": None,
+        "min_deposit_reconciliation": {},
+    }
+
+    try:
+        claude_result = _extract_with_claude(combined_text, name) or {}
+        if claude_result:
+            accounts = claude_result.get("accounts") or []
+            result["account_types"] = [a["name"] for a in accounts if a.get("name")]
+            result["instruments_count"] = claude_result.get("instruments_count")
+            result["funding_methods"] = claude_result.get("funding_methods") or []
+            result["min_deposit_usd"] = claude_result.get("min_deposit_usd")
+            raw_lev = claude_result.get("max_leverage")
+            if raw_lev:
+                parsed = _parse_leverage_value(str(raw_lev))
+                if parsed:
+                    result["leverage"] = [parsed]
+            result["leverage_sources"] = {"claude_geo": result["leverage"]}
+            result["leverage_confidence"] = "low"
+            result["leverage_reconciliation"] = {"method": "single_source_geo_proxy"}
+            result["min_deposit_sources"] = {"claude_geo": result["min_deposit_usd"]}
+            result["min_deposit_confidence"] = "low"
+            result["min_deposit_reconciliation"] = {"method": "single_source_geo_proxy"}
+    except Exception as e:
+        print(f"    [Geo-proxy] Claude extraction failed for {name}: {e}")
+
+    return result
+
+
 async def scrape_all():
+    import argparse
+    parser = argparse.ArgumentParser(description="Pricing scraper with market localisation")
+    parser.add_argument("--broker", type=str, help="Scrape single broker by ID (e.g. ic-markets)")
+    parser.add_argument("--market", type=str, help="Scrape single market for all brokers (e.g. sg)")
+    parser.add_argument("--markets", action="store_true", help="Scrape all priority APAC markets after global")
+    args = parser.parse_args()
+
+    # Determine which brokers to scrape
+    brokers = COMPETITORS
+    if args.broker:
+        brokers = [c for c in COMPETITORS if c["id"] == args.broker]
+        if not brokers:
+            print(f"Unknown broker: {args.broker}")
+            return
+
+    # Determine which markets to scrape
+    markets_to_scrape: list[str] = ["global"]
+    if args.market:
+        markets_to_scrape = [args.market]
+    elif args.markets:
+        markets_to_scrape = ["global"] + PRIORITY_MARKETS
+
     run_id = log_scraper_run(SCRAPER_NAME, "running")
     total_records = 0
     error_summary = []
@@ -856,99 +1097,33 @@ async def scrape_all():
         conn = get_db()
         snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        for competitor in COMPETITORS:
-            cid = competitor["id"]
-            name = competitor["name"]
-            print(f"Processing {name}...")
+        for market_code in markets_to_scrape:
+            print(f"\n{'='*60}")
+            print(f"  Market: {market_code.upper()}")
+            print(f"{'='*60}")
 
-            try:
-                data = await scrape_pricing(page, competitor)
+            for competitor in brokers:
+                cid = competitor["id"]
+                name = competitor["name"]
+                print(f"\nProcessing {name} [{market_code}]...")
 
-                # Guard: skip upsert if extraction returned nothing useful
-                has_data = (
-                    data.get("min_deposit_usd") is not None
-                    or bool(data.get("leverage"))
-                    or bool(data.get("account_types"))
-                    or data.get("instruments_count") is not None
-                    or bool(data.get("spread_json"))
-                )
-                if not has_data:
-                    print(f"  ⚠ {name}: no pricing data extracted — preserving existing record")
-                    error_summary.append(f"{name}: extraction empty, skipped upsert")
-                    await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
-                    continue
+                try:
+                    if market_code == "global":
+                        data = await scrape_pricing(page, competitor)
+                    else:
+                        data = await scrape_market(page, competitor, market_code)
 
-                leverage_json = json.dumps(data["leverage"])
-                account_types_json = json.dumps(data["account_types"])
-                funding_methods_json = json.dumps(data["funding_methods"])
-                spread_json = json.dumps(data["spread_json"]) if data.get("spread_json") else None
-                leverage_sources_json = json.dumps(data.get("leverage_sources", {}))
-                leverage_confidence = data.get("leverage_confidence")
-                leverage_reconciliation_json = json.dumps(data.get("leverage_reconciliation", {}))
-                min_deposit_sources_json = json.dumps(data.get("min_deposit_sources", {}))
-                min_deposit_confidence = data.get("min_deposit_confidence")
-                min_deposit_reconciliation_json = json.dumps(data.get("min_deposit_reconciliation", {}))
+                    if _store_pricing_snapshot(conn, cid, snapshot_date, data, market_code):
+                        total_records += 1
+                    else:
+                        error_summary.append(f"{name}[{market_code}]: extraction empty, skipped upsert")
 
-                conn.execute(
-                    "DELETE FROM pricing_snapshots WHERE competitor_id=? AND snapshot_date=?",
-                    (cid, snapshot_date),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO pricing_snapshots
-                        (competitor_id, snapshot_date, leverage_json, account_types_json,
-                         min_deposit_usd, instruments_count, funding_methods_json, spread_json,
-                         leverage_sources_json, leverage_confidence, leverage_reconciliation_json,
-                         min_deposit_sources_json, min_deposit_confidence, min_deposit_reconciliation_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        cid,
-                        snapshot_date,
-                        leverage_json,
-                        account_types_json,
-                        data["min_deposit_usd"],
-                        data["instruments_count"],
-                        funding_methods_json,
-                        spread_json,
-                        leverage_sources_json,
-                        leverage_confidence,
-                        leverage_reconciliation_json,
-                        min_deposit_sources_json,
-                        min_deposit_confidence,
-                        min_deposit_reconciliation_json,
-                    ),
-                )
-                conn.commit()
-                total_records += 1
+                except Exception as e:
+                    msg = f"{name}[{market_code}]: {e}"
+                    print(f"    Error: {msg}")
+                    error_summary.append(msg)
 
-                # Change detection
-                if data["min_deposit_usd"] is not None:
-                    detect_change(
-                        conn, cid, "pricing", "min_deposit_usd",
-                        str(data["min_deposit_usd"]), "high"
-                    )
-                if data["leverage"]:
-                    try:
-                        lev_vals = [
-                            int(lev.split(":")[1])
-                            for lev in data["leverage"]
-                            if ":" in lev and lev.split(":")[1].isdigit()
-                        ]
-                        max_lev = max(lev_vals) if lev_vals else None
-                        if max_lev:
-                            detect_change(conn, cid, "pricing", "max_leverage", str(max_lev), "high")
-                    except Exception as lev_err:
-                        print(f"    [Change detection] Leverage parse error for {name}: {lev_err}")
-                if data.get("spread_json"):
-                    detect_change(conn, cid, "pricing", "spread_json", json.dumps(data["spread_json"]), "medium")
-
-            except Exception as e:
-                msg = f"{name}: {e}"
-                print(f"    Error: {msg}")
-                error_summary.append(msg)
-
-            await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
         conn.close()
         await browser.close()
