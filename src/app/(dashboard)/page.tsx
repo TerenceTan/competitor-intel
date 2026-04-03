@@ -20,6 +20,7 @@ import { SeverityBadge } from "@/components/shared/severity-badge";
 import { KpiRow } from "@/components/charts/kpi-row";
 import { CompetitivePosition } from "@/components/charts/competitive-position";
 import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
+import { MorningBrief } from "@/components/charts/morning-brief";
 import { ReputationLeaderboard } from "@/components/charts/reputation-leaderboard";
 import { SeverityDonut } from "@/components/charts/severity-donut";
 import { SCRAPERS } from "@/lib/constants";
@@ -245,18 +246,9 @@ export default async function ExecutiveSummaryPage() {
 
       {/* ===== ACT 1: WHAT HAPPENED? ===== */}
 
-      {/* Morning Headline */}
+      {/* Morning Brief */}
       {latestPortfolio?.summary ? (
-        <Card className="p-5 border-l-4 border-l-primary border-gray-200 bg-white">
-          <div className="flex items-start justify-between gap-4">
-            <p className="text-lg text-gray-800 leading-relaxed font-medium">
-              {latestPortfolio.summary}
-            </p>
-            <span className="text-xs text-gray-400 whitespace-nowrap shrink-0 mt-1">
-              <TimeAgo dateStr={latestPortfolio.generatedAt} />
-            </span>
-          </div>
-        </Card>
+        <MorningBrief summary={latestPortfolio.summary} generatedAt={latestPortfolio.generatedAt} />
       ) : (
         <Card className="p-5 border-gray-200 bg-white text-center text-gray-400 text-sm">
           No AI brief yet — run the AI analysis to generate a morning headline.
