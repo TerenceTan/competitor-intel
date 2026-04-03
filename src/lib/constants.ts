@@ -29,9 +29,7 @@ export const MARKET_FLAGS: Record<string, string> = {
 /** Social media platforms tracked across competitor profiles */
 export const PLATFORMS = [
   "youtube",
-  "telegram",
   "facebook",
   "instagram",
-  "line",
-  "zalo",
+  "x",
 ] as const;

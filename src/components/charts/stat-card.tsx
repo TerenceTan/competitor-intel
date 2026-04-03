@@ -10,18 +10,26 @@ interface StatCardProps {
   icon: LucideIcon;
   sparklineData?: { value: number }[];
   subtitle?: string;
+  delta?: { value: number; label: string };
   iconBgClassName?: string;
   iconClassName?: string;
 }
 
-export function StatCard({ title, value, icon: Icon, sparklineData, subtitle, iconBgClassName, iconClassName }: StatCardProps) {
+export function StatCard({ title, value, icon: Icon, sparklineData, subtitle, delta, iconBgClassName, iconClassName }: StatCardProps) {
   return (
     <Card className="p-5 border-gray-200 bg-white hover:shadow-sm transition-shadow">
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">{title}</p>
           <p className="text-2xl font-bold text-gray-900 mt-1.5">{value}</p>
-          {subtitle && (
+          {delta && (
+            <p className={`text-xs font-medium mt-1 flex items-center gap-1 ${delta.value > 0 ? "text-emerald-600" : delta.value < 0 ? "text-red-600" : "text-gray-500"}`}>
+              <span>{delta.value > 0 ? "▲" : delta.value < 0 ? "▼" : "—"}</span>
+              <span>{delta.value > 0 ? "+" : ""}{delta.value}</span>
+              <span className="text-gray-400 font-normal">{delta.label}</span>
+            </p>
+          )}
+          {subtitle && !delta && (
             <p className="text-xs text-gray-500 mt-1">{subtitle}</p>
           )}
         </div>
