@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileHeader } from "@/components/layout/mobile-header";
 import { BetaBar } from "@/components/layout/beta-bar";
+import { StaleDataBanner } from "@/components/layout/stale-data-banner";
 import { formatDateTime } from "@/lib/utils";
 
 // Dashboard pages query the SQLite DB at render time — never prerender statically
@@ -27,6 +28,9 @@ export default async function DashboardLayout({
     <div className="flex flex-col min-h-screen bg-gray-50">
       {/* Notice bar — dismissible */}
       <BetaBar />
+
+      {/* Stale-data warning — renders only when a scraper has missed >2 cycles */}
+      <StaleDataBanner />
 
       {/* Skip to main content */}
       <a

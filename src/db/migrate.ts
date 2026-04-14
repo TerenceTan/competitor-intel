@@ -192,6 +192,15 @@ export function runMigrations() {
   // Backfill any pre-migration rows that may have NULL (SQLite allows this on some paths)
   sqlite.exec(`UPDATE competitors SET is_self = 0 WHERE is_self IS NULL AND id != 'pepperstone'`);
 
+  // Noise-floor metric columns on scraper_runs (see scrapers/change_thresholds.py)
+  for (const col of ["raw_deltas_count", "registered_events_count"]) {
+    try {
+      sqlite.exec(`ALTER TABLE scraper_runs ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
   // Ensure Pepperstone exists as the self-benchmark row
   sqlite.exec(`
     INSERT OR IGNORE INTO competitors (id, name, tier, website, is_self)

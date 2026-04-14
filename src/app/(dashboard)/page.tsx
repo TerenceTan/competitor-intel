@@ -31,6 +31,7 @@ export default async function ExecutiveSummaryPage() {
   const twoWeeksAgo = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString();
   const prevWeekStart = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString();
   const prevWeekEnd = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   // --- Parallel data fetching ---
   const [
@@ -48,6 +49,9 @@ export default async function ExecutiveSummaryPage() {
     allLatestPromos,
     allLatestPricing,
     latestRuns,
+    trustpilotTrend,
+    promoTrend,
+    socialTrend,
   ] = await Promise.all([
     // All competitors
     db.select().from(competitors),
@@ -97,6 +101,35 @@ export default async function ExecutiveSummaryPage() {
         return { label: s.label, domain: s.domain, run: run ?? null };
       })
     ),
+    // Sparkline: Pepperstone Trustpilot score over last 30 days
+    db.select({ date: reputationSnapshots.snapshotDate, score: reputationSnapshots.trustpilotScore })
+      .from(reputationSnapshots)
+      .where(and(
+        sql`${reputationSnapshots.competitorId} = (SELECT id FROM competitors WHERE is_self = 1 LIMIT 1)`,
+        gte(reputationSnapshots.snapshotDate, thirtyDaysAgo.split("T")[0]),
+      ))
+      .orderBy(reputationSnapshots.snapshotDate),
+    // Sparkline: total competitor promos per snapshot date (30 days)
+    db.select({
+      date: promoSnapshots.snapshotDate,
+      count: sql<number>`SUM(json_array_length(${promoSnapshots.promotionsJson}))`,
+    })
+      .from(promoSnapshots)
+      .where(gte(promoSnapshots.snapshotDate, thirtyDaysAgo.split("T")[0]))
+      .groupBy(promoSnapshots.snapshotDate)
+      .orderBy(promoSnapshots.snapshotDate),
+    // Sparkline: Pepperstone total followers over last 30 days
+    db.select({
+      date: socialSnapshots.snapshotDate,
+      total: sql<number>`SUM(${socialSnapshots.followers})`,
+    })
+      .from(socialSnapshots)
+      .where(and(
+        sql`${socialSnapshots.competitorId} = (SELECT id FROM competitors WHERE is_self = 1 LIMIT 1)`,
+        gte(socialSnapshots.snapshotDate, thirtyDaysAgo.split("T")[0]),
+      ))
+      .groupBy(socialSnapshots.snapshotDate)
+      .orderBy(socialSnapshots.snapshotDate),
   ]);
 
   // --- Derived data ---
@@ -114,6 +147,13 @@ export default async function ExecutiveSummaryPage() {
   const highSevCount = highSevThisWeek[0]?.count ?? 0;
   const highSevPrev = highSevLastWeek[0]?.count ?? 0;
   const changesByDay = changesByDayRaw.map((r) => ({ value: r.count }));
+
+  // Sparkline data for KPI cards
+  const trustpilotSparkline = trustpilotTrend
+    .filter((r) => r.score != null)
+    .map((r) => ({ value: r.score! }));
+  const promoSparkline = promoTrend.map((r) => ({ value: r.count ?? 0 }));
+  const socialSparkline = socialTrend.map((r) => ({ value: r.total ?? 0 }));
 
   // KPI: Promo pressure
   let currentPromoCount = 0;
@@ -262,6 +302,9 @@ export default async function ExecutiveSummaryPage() {
         changesByDay={changesByDay}
         promosPressure={{ count: currentPromoCount, prevCount: prevPromoCount }}
         socialShareOfVoice={socialSov}
+        trustpilotSparkline={trustpilotSparkline}
+        promoSparkline={promoSparkline}
+        socialSparkline={socialSparkline}
       />
 
       {/* Competitive Position Scorecard */}

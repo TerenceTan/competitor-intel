@@ -138,4 +138,9 @@ export const scraperRuns = sqliteTable("scraper_runs", {
   status: text("status").notNull().default("running"),
   errorMessage: text("error_message"),
   recordsProcessed: integer("records_processed").default(0),
+  // Noise-floor metric: how many raw diffs vs how many made it past the
+  // threshold filter in scrapers/change_thresholds.py. A healthy ratio is
+  // registered << raw. Surface on /admin page later.
+  rawDeltasCount: integer("raw_deltas_count").notNull().default(0),
+  registeredEventsCount: integer("registered_events_count").notNull().default(0),
 });

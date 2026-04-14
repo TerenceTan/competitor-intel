@@ -729,10 +729,6 @@ async def scrape_all():
             cid = competitor["id"]
             name = competitor["name"]
 
-            # Skip Pepperstone (is_self) — no promos to scrape
-            if competitor.get("is_self"):
-                continue
-
             promo_url = competitor.get("promo_url")
             if not promo_url:
                 print(f"\n[{name}] No promo URL — aggregator-only")
@@ -758,7 +754,7 @@ async def scrape_all():
     merged = merge_all_sources(official_promos, aggregator_promos)
 
     # Count target brokers with promos
-    target_ids = {c["id"] for c in COMPETITORS if not c.get("is_self")}
+    target_ids = {c["id"] for c in COMPETITORS}
     brokers_with_promos = sum(1 for cid in merged if cid in target_ids and merged[cid])
     total_promos = sum(len(v) for cid, v in merged.items() if cid in target_ids)
     print(f"  {total_promos} unique promos across {brokers_with_promos} broker(s)")
@@ -769,9 +765,6 @@ async def scrape_all():
 
     for competitor in COMPETITORS:
         cid = competitor["id"]
-        if competitor.get("is_self"):
-            continue
-
         promos = merged.get(cid, [])
         total_records += _store_promo_snapshot(conn, cid, snapshot_date, promos, "global", error_summary)
 
@@ -828,7 +821,7 @@ async def scrape_markets():
     parser.add_argument("--markets", action="store_true", help="All priority APAC markets")
     args = parser.parse_args()
 
-    brokers = [c for c in COMPETITORS if not c.get("is_self")]
+    brokers = list(COMPETITORS)
     if args.broker:
         brokers = [c for c in brokers if c["id"] == args.broker]
         if not brokers:

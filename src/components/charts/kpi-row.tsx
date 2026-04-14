@@ -9,6 +9,9 @@ interface KpiRowProps {
   changesByDay: { value: number }[];
   promosPressure: { count: number; prevCount: number };
   socialShareOfVoice: number | null; // percentage 0-100
+  trustpilotSparkline?: { value: number }[];
+  promoSparkline?: { value: number }[];
+  socialSparkline?: { value: number }[];
 }
 
 export function KpiRow({
@@ -17,6 +20,9 @@ export function KpiRow({
   changesByDay,
   promosPressure,
   socialShareOfVoice,
+  trustpilotSparkline,
+  promoSparkline,
+  socialSparkline,
 }: KpiRowProps) {
   const tpDelta =
     trustpilot.ours != null && trustpilot.fieldAvg != null
@@ -32,6 +38,7 @@ export function KpiRow({
         title="Our Trustpilot vs Field"
         value={trustpilot.ours != null ? trustpilot.ours.toFixed(1) : "—"}
         icon={Shield}
+        sparklineData={trustpilotSparkline}
         subtitle={trustpilot.fieldAvg != null ? `Field avg: ${trustpilot.fieldAvg.toFixed(1)}` : undefined}
         delta={tpDelta != null ? { value: tpDelta, label: "vs avg" } : undefined}
         iconBgClassName={tpDelta != null && tpDelta >= 0 ? "bg-emerald-50" : "bg-red-50"}
@@ -50,6 +57,7 @@ export function KpiRow({
         title="Competitor Promos"
         value={promosPressure.count}
         icon={Megaphone}
+        sparklineData={promoSparkline}
         delta={{ value: promoDelta, label: "vs last week" }}
         iconBgClassName="bg-amber-50"
         iconClassName="text-amber-600"
@@ -58,6 +66,7 @@ export function KpiRow({
         title="Social Share of Voice"
         value={socialShareOfVoice != null ? `${socialShareOfVoice}%` : "—"}
         icon={Share2}
+        sparklineData={socialSparkline}
         subtitle="Pepperstone % of total followers"
         iconBgClassName="bg-blue-50"
         iconClassName="text-blue-600"

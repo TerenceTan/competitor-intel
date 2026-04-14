@@ -14,8 +14,22 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from config import DB_PATH as _DB_PATH_RAW
 
-DB_PATH = os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
-# DB_PATH = _DB_PATH_RAW if os.path.isabs(_DB_PATH_RAW) else os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
+# Noise-floor thresholds for change detection (see change_thresholds.py).
+try:
+    from change_thresholds import should_register_change
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from change_thresholds import should_register_change
+
+# Module-level counters for the noise-floor metric.
+# log_scraper_run() resets these at the start of each run; update_scraper_run()
+# persists them to scraper_runs at the end. Scrapers run sequentially via cron,
+# so a single global counter is safe (not thread-safe, but not needed).
+_noise_counters = {"raw_deltas": 0, "registered_events": 0}
+
+# DB_PATH = os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
+DB_PATH = _DB_PATH_RAW if os.path.isabs(_DB_PATH_RAW) else os.path.join(_PROJECT_ROOT, _DB_PATH_RAW.lstrip("./"))
 
 
 def get_db() -> sqlite3.Connection:
@@ -87,6 +101,17 @@ def get_db() -> sqlite3.Connection:
         except Exception:
             pass  # column already exists
 
+    # Additive migration: noise-floor metric columns on scraper_runs
+    # raw_deltas_count         = # of diffs detected before threshold filtering
+    # registered_events_count  = # of diffs that actually became change_events rows
+    # Healthy signal-to-noise ratio: registered << raw
+    for col in ("raw_deltas_count", "registered_events_count"):
+        try:
+            conn.execute(f"ALTER TABLE scraper_runs ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
@@ -103,7 +128,14 @@ def log_scraper_run(scraper_name: str, status: str, records: int = 0, error: str
     """
     Insert a new row into scraper_runs and return its rowid (run_id).
     status is typically 'running' when called at the start.
+
+    Also resets the noise-floor counters for this run so that the
+    raw_deltas_count / registered_events_count written by update_scraper_run()
+    reflect only the work done by the scraper that just started.
     """
+    _noise_counters["raw_deltas"] = 0
+    _noise_counters["registered_events"] = 0
+
     conn = get_db()
     try:
         cur = conn.execute(
@@ -122,7 +154,8 @@ def log_scraper_run(scraper_name: str, status: str, records: int = 0, error: str
 def update_scraper_run(run_id: int, status: str, records: int = 0, error: str = None):
     """
     Update an existing scraper_run row to reflect completion.
-    Sets finished_at to now.
+    Sets finished_at to now and persists the noise-floor counters accumulated
+    by detect_change() during this run.
     """
     conn = get_db()
     try:
@@ -132,10 +165,20 @@ def update_scraper_run(run_id: int, status: str, records: int = 0, error: str = 
             SET finished_at = ?,
                 status = ?,
                 records_processed = ?,
-                error_message = ?
+                error_message = ?,
+                raw_deltas_count = ?,
+                registered_events_count = ?
             WHERE rowid = ?
             """,
-            (datetime.now(timezone.utc).isoformat(), status, records, error, run_id),
+            (
+                datetime.now(timezone.utc).isoformat(),
+                status,
+                records,
+                error,
+                _noise_counters["raw_deltas"],
+                _noise_counters["registered_events"],
+                run_id,
+            ),
         )
         conn.commit()
     finally:
@@ -153,11 +196,17 @@ def detect_change(
 ) -> bool:
     """
     Look up the most recent change_event for (competitor_id, domain, field, market_code).
-    If new_value differs from old new_value (or no prior record exists), write
-    a new change_event row and return True.  Otherwise return False.
+    If new_value differs from old new_value AND the delta clears the noise floor
+    configured in change_thresholds.py, write a new change_event row and return True.
+    Otherwise return False.
 
-    new_value is stored/compared as a string so that JSON blobs and numbers
-    are handled uniformly.
+    new_value is stored/compared as a string so JSON blobs and numbers are
+    handled uniformly.
+
+    The noise-floor filter lives in should_register_change() — see
+    change_thresholds.py for the rationale and the per-field thresholds.
+    First-time values (no prior change_event row) always register, so the
+    filter only applies to actual diffs.
     """
     if new_value is None:
         print(f"  [detect_change] Skipping {competitor_id}/{domain}/{field} — new_value is None")
@@ -179,7 +228,24 @@ def detect_change(
     old_str = row["new_value"] if row else None
 
     if old_str == new_str:
-        return False  # No change
+        return False  # No delta at all — not even counted as a raw delta.
+
+    # We have a genuine diff. Count it before applying the noise filter so
+    # the noise-floor metric reflects how much the thresholds are suppressing.
+    _noise_counters["raw_deltas"] += 1
+
+    # First-time values (no prior row) always register — nothing to compare
+    # against, and the user wants to see the initial baseline in the feed.
+    if old_str is not None:
+        should_register, effective_severity = should_register_change(
+            domain, field, old_str, new_str, severity
+        )
+        if not should_register:
+            # Below the noise floor — skip the insert. Caller sees this as
+            # "no meaningful change", same as if the value had been unchanged.
+            return False
+    else:
+        effective_severity = severity
 
     conn.execute(
         """
@@ -192,12 +258,13 @@ def detect_change(
             field,
             old_str,
             new_str,
-            severity,
+            effective_severity,
             datetime.now(timezone.utc).isoformat(),
             market_code,
         ),
     )
     conn.commit()
+    _noise_counters["registered_events"] += 1
     return True
 
 
