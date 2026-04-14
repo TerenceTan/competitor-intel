@@ -64,23 +64,37 @@ function splitIntoBullets(text: string): string[] {
 
   // Split by sentence boundaries: ". " followed by uppercase letter
   const sentences = abbreviated.split(/(?<=\.)\s+(?=[A-Z])/);
-  if (sentences.length >= 2) {
-    // Restore abbreviation dots and merge very short fragments
-    const merged: string[] = [];
-    for (const s of sentences) {
-      const restored = s.replaceAll(ABBR_PLACEHOLDER, ". ").trim();
-      if (!restored) continue;
-      if (merged.length > 0 && merged[merged.length - 1].length < 60) {
-        merged[merged.length - 1] += " " + restored;
+  const restored = sentences.map((s) => s.replaceAll(ABBR_PLACEHOLDER, ". ").trim()).filter(Boolean);
+
+  // For any sentence that's very long and contains inline "(1)...(2)..." numbering,
+  // break it into sub-bullets. This handles AI summaries that pack multiple themes
+  // into a single overview sentence.
+  const final: string[] = [];
+  for (const sentence of restored) {
+    if (sentence.length > 300 && /\(\d+\)/.test(sentence)) {
+      // Split on "(N)" boundaries, keeping introductory text as a lead-in
+      const parts = sentence.split(/;\s*(?=\(\d+\))|;\s*and\s+(?=\(\d+\))/);
+      for (const part of parts) {
+        const cleaned = part.replace(/^.*?(?=\(\d+\))/, "").trim() || part.trim();
+        // Strip the leading "(N) " to keep bullets clean
+        const withoutNum = cleaned.replace(/^\(\d+\)\s*/, "").trim();
+        if (withoutNum) {
+          // Capitalise first letter and ensure it ends with a period
+          const capitalised = withoutNum.charAt(0).toUpperCase() + withoutNum.slice(1);
+          final.push(capitalised.endsWith(".") ? capitalised : capitalised.replace(/[;,]\s*$/, "."));
+        }
+      }
+    } else {
+      // Merge very short fragments with previous bullet
+      if (final.length > 0 && final[final.length - 1].length < 60) {
+        final[final.length - 1] += " " + sentence;
       } else {
-        merged.push(restored);
+        final.push(sentence);
       }
     }
-    return merged;
   }
 
-  // Fallback: return as single item
-  return [text.trim()];
+  return final.length > 0 ? final : [text.trim()];
 }
 
 export function MorningBrief({ summary, generatedAt }: MorningBriefProps) {
