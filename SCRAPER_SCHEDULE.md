@@ -12,7 +12,7 @@ All times are **UTC**. Run from the project root (`/home/ubuntu/app`).
 | Scraper | Frequency | Cron | Rationale |
 |---|---|---|---|
 | `news_scraper.py` | Every 6 hours | `0 */6 * * *` | News is time-sensitive — competitor announcements and press can break at any time |
-| `reputation_scraper.py` | Daily at 7am | `0 7 * * *` | Trustpilot/app store scores shift with each new review; daily snapshots catch meaningful movement |
+| `reputation_scraper.py` | Every 3 days at 7am | `0 7 */3 * *` | Reputation scores drift continuously — 3-day cadence reduces raw noise by ~66% while still catching meaningful movements within a week. Noise filtering (change_thresholds.py) handles micro-deltas between runs. |
 | `ai_analyzer.py` | Daily at 8am | `0 8 * * *` | Run after reputation data is fresh; produces insights based on the latest snapshot |
 | `promo_scraper.py` | Every 2 days at 8am | `0 8 */2 * *` | Promotions change with campaigns (flash offers, limited-time bonuses) but not daily |
 | `pricing_scraper.py` | Weekly, Monday 6am | `0 6 * * 1` | Account types and min deposits are stable; spreads can shift but aren't tracked as a time-series |
@@ -33,8 +33,8 @@ SSH into the server and run `crontab -e`, then add:
 # News — every 6 hours
 0 */6 * * * cd /home/ubuntu/app && python scrapers/news_scraper.py >> logs/news_scraper.log 2>&1
 
-# Reputation — daily at 7am UTC
-0 7 * * * cd /home/ubuntu/app && python scrapers/reputation_scraper.py >> logs/reputation_scraper.log 2>&1
+# Reputation — every 3 days at 7am UTC
+0 7 */3 * * cd /home/ubuntu/app && python scrapers/reputation_scraper.py >> logs/reputation_scraper.log 2>&1
 
 # AI analysis — daily at 8am UTC (after reputation is done)
 0 8 * * * cd /home/ubuntu/app && python scrapers/ai_analyzer.py >> logs/ai_analyzer.log 2>&1

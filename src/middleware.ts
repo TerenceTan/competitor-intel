@@ -25,11 +25,31 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
+/**
+ * Validate Bearer API key for /api/v1/ routes.
+ * Uses constant-time comparison to prevent timing attacks.
+ */
+function validateApiKey(request: NextRequest): boolean {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return false;
+
+  const authHeader = request.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) return false;
+
+  return timingSafeEqual(match[1], apiKey);
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow login page and auth API routes
   if (pathname === "/login" || pathname.startsWith("/api/auth/")) {
+    return NextResponse.next();
+  }
+
+  // Allow /api/v1/ routes with valid API key (for external integrations)
+  if (pathname.startsWith("/api/v1/") && validateApiKey(request)) {
     return NextResponse.next();
   }
 
