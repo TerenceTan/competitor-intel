@@ -80,6 +80,76 @@ GET /api/v1/promotions?limit=5
 
 ---
 
+### GET /api/v1/trends
+
+Returns aggregated market intelligence — promo activity, spread direction, reputation moves, and the latest AI morning brief summary. **No competitor names are exposed** — safe for external consumption.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | number | 7 | Lookback window in days (1–90) |
+| `market` | string | all | Filter by market code (e.g. `th`, `sg`, `global`) |
+
+**Response format:**
+```json
+{
+  "period": "2026-04-07 to 2026-04-14",
+  "days": 7,
+  "promos": {
+    "total": 12,
+    "active": 8,
+    "by_market": { "th": 3, "global": 5, "sg": 2, "vn": 2 },
+    "by_type": { "deposit_bonus": 5, "cashback": 3, "competition": 2, "referral": 2 },
+    "avg_bonus_value": "$50",
+    "trend": "up",
+    "vs_previous_period": { "current": 12, "previous": 9 }
+  },
+  "spreads": {
+    "direction": "tightening",
+    "avg_spread_pips": 0.85,
+    "change_pct": -2.1,
+    "avg_min_deposit": 45,
+    "brokers_reporting": 8
+  },
+  "reputation": {
+    "avg_trustpilot": 4.12,
+    "trustpilot_change": 0.05,
+    "snapshots_in_period": 10
+  },
+  "changes": {
+    "high_severity": 3,
+    "total": 18
+  },
+  "summary": "3 brokers launched deposit bonuses in Thailand this week...",
+  "summary_generated_at": "2026-04-14T08:00:00.000Z",
+  "meta": {
+    "market_filter": "all",
+    "generated_at": "2026-04-14T10:00:00.000Z"
+  }
+}
+```
+
+**Key fields:**
+- `promos.trend`: `"up"`, `"down"`, or `"flat"` vs previous period
+- `spreads.direction`: `"tightening"`, `"widening"`, `"stable"`, or `"insufficient_data"`
+- `summary`: The latest AI-generated morning brief (natural language overview)
+- All data excludes Pepperstone (self-benchmark) unless explicitly requested
+
+**Example requests:**
+```bash
+# Last 7 days, all markets
+GET /api/v1/trends
+
+# Last 30 days, Thailand only
+GET /api/v1/trends?days=30&market=th
+
+# Last 14 days, global market
+GET /api/v1/trends?days=14&market=global
+```
+
+---
+
 ## Competitor IDs
 
 These are the valid `competitor` filter values:
