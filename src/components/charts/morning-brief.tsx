@@ -49,25 +49,31 @@ const bulletConfig = {
 };
 
 function splitIntoBullets(text: string): string[] {
-  // Try splitting by sentence-ending punctuation followed by space + capital letter
-  // Also handle explicit bullet patterns like "• " or "- " or numbered lists
+  // Try splitting by explicit bullet/list markers: "• ", "- ", "1. ", "1) "
   const explicitBullets = text.split(/(?:^|\n)\s*(?:[-•●]\s+|\d+[.)]\s+)/);
   if (explicitBullets.filter((b) => b.trim()).length >= 3) {
     return explicitBullets.filter((b) => b.trim()).map((b) => b.trim());
   }
 
-  // Split by sentences — look for ". " followed by uppercase or common transition words
-  const sentences = text.split(/(?<=\.)\s+(?=[A-Z])/);
+  // Replace common abbreviations with a placeholder so they don't create
+  // false sentence breaks (e.g. "vs. XM" or "e.g. some example").
+  const ABBR_PLACEHOLDER = "\x00";
+  const abbreviated = text.replace(/\b(vs|e\.g|i\.e|etc|approx|incl|excl|no)\.\s/gi, (m) =>
+    m.replace(". ", ABBR_PLACEHOLDER),
+  );
+
+  // Split by sentence boundaries: ". " followed by uppercase letter
+  const sentences = abbreviated.split(/(?<=\.)\s+(?=[A-Z])/);
   if (sentences.length >= 2) {
-    // Merge very short sentences with their neighbor
+    // Restore abbreviation dots and merge very short fragments
     const merged: string[] = [];
     for (const s of sentences) {
-      const trimmed = s.trim();
-      if (!trimmed) continue;
+      const restored = s.replaceAll(ABBR_PLACEHOLDER, ". ").trim();
+      if (!restored) continue;
       if (merged.length > 0 && merged[merged.length - 1].length < 60) {
-        merged[merged.length - 1] += " " + trimmed;
+        merged[merged.length - 1] += " " + restored;
       } else {
-        merged.push(trimmed);
+        merged.push(restored);
       }
     }
     return merged;
