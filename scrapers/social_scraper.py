@@ -137,25 +137,29 @@ def _thunderbit_extract(url: str, schema: dict, api_key: str) -> dict | None:
     Retries up to _THUNDERBIT_MAX_RETRIES times with backoff on failure.
     Returns the extracted data dict or None.
     """
-    payload = json.dumps({
+    payload = {
         "url": url,
         "schema": schema,
         "timeout": 45000,
-    }).encode()
+    }
 
     for attempt in range(1, _THUNDERBIT_MAX_RETRIES + 1):
         try:
-            req = Request(
+            resp = requests.post(
                 THUNDERBIT_API_URL,
-                data=payload,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=90,
             )
-            with urlopen(req, timeout=60) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
 
+            if resp.status_code != 200:
+                body = resp.text[:300] if resp.text else "(empty)"
+                print(f"    [Thunderbit] Attempt {attempt}/{_THUNDERBIT_MAX_RETRIES} HTTP {resp.status_code} for {url}: {body}")
+                if attempt < _THUNDERBIT_MAX_RETRIES:
+                    time.sleep(_THUNDERBIT_RETRY_DELAY)
+                continue
+
+            result = resp.json()
             if result.get("success"):
                 data = result.get("data", {}).get("extract")
                 if data:
