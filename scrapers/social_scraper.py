@@ -3,13 +3,12 @@ social_scraper.py
 -----------------
 Social media scraper for competitor follower counts:
   - YouTube: YouTube Data API v3 (channel search + subscriber count + recent videos)
-  - Facebook: ScraperAPI render=true (public page follower count)
-  - Instagram: ScraperAPI render=true (profile follower count from og:description)
-  - X (Twitter): ScraperAPI render=true
+  - Facebook, Instagram, X: Thunderbit AI extraction (primary), ScraperAPI regex (fallback)
 
 Requires environment variables:
-  YOUTUBE_API_KEY   – for YouTube Data API
-  SCRAPERAPI_KEY    – for Facebook, Instagram, X scraping
+  YOUTUBE_API_KEY      – for YouTube Data API
+  THUNDERBIT_API_KEY   – for AI-powered social extraction (Facebook, Instagram, X)
+  SCRAPERAPI_KEY       – fallback for Facebook, Instagram, X scraping
 
 Run from the project root:
     python scrapers/social_scraper.py
@@ -45,6 +44,40 @@ from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
 
 SCRAPER_NAME = "social_scraper"
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
+THUNDERBIT_API_URL = "https://open.thunderbit.com/v1/extract"
+
+# --- Thunderbit JSON schemas for each platform ---
+_FB_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "followers": {"type": "number", "description": "Total number of followers or people who follow this page"},
+        "likes": {"type": "number", "description": "Total number of page likes"},
+        "posts_last_7d": {"type": "number", "description": "Number of posts visible on the page published in the last 7 days"},
+    },
+}
+
+_IG_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "followers": {"type": "number", "description": "Total number of followers"},
+        "following": {"type": "number", "description": "Number of accounts this profile follows"},
+        "posts_count": {"type": "number", "description": "Total number of posts"},
+        "is_verified": {"type": "boolean", "description": "Whether the account is verified"},
+    },
+}
+
+_X_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "followers": {"type": "number", "description": "Total number of followers"},
+        "following": {"type": "number", "description": "Number of accounts this profile follows"},
+        "posts_count": {"type": "number", "description": "Total number of posts or tweets"},
+        "is_verified": {"type": "boolean", "description": "Whether the account is verified"},
+    },
+}
+
+_THUNDERBIT_MAX_RETRIES = 2
+_THUNDERBIT_RETRY_DELAY = 5  # seconds
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -92,6 +125,53 @@ def _parse_abbreviated_number(text: str) -> int | None:
     if suffix in multipliers:
         num *= multipliers[suffix]
     return int(num)
+
+
+# ---------------------------------------------------------------------------
+# Thunderbit AI extraction
+# ---------------------------------------------------------------------------
+
+def _thunderbit_extract(url: str, schema: dict, api_key: str) -> dict | None:
+    """
+    Extract structured data from a URL using Thunderbit AI extraction.
+    Retries up to _THUNDERBIT_MAX_RETRIES times with backoff on failure.
+    Returns the extracted data dict or None.
+    """
+    payload = json.dumps({
+        "url": url,
+        "schema": schema,
+        "timeout": 45000,
+    }).encode()
+
+    for attempt in range(1, _THUNDERBIT_MAX_RETRIES + 1):
+        try:
+            req = Request(
+                THUNDERBIT_API_URL,
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+
+            if result.get("success"):
+                data = result.get("data", {}).get("extractedData")
+                if data:
+                    return data
+                print(f"    [Thunderbit] Empty extractedData for {url}")
+                return None
+
+            print(f"    [Thunderbit] API returned success=false for {url}: {result.get('error', 'unknown')}")
+            return None
+
+        except Exception as e:
+            print(f"    [Thunderbit] Attempt {attempt}/{_THUNDERBIT_MAX_RETRIES} failed for {url}: {e}")
+            if attempt < _THUNDERBIT_MAX_RETRIES:
+                time.sleep(_THUNDERBIT_RETRY_DELAY)
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -189,61 +269,67 @@ def fetch_youtube_stats(competitor_name: str, query: str, api_key: str) -> dict 
 
 
 # ---------------------------------------------------------------------------
-# Facebook
+# Facebook — legacy (ScraperAPI + regex fallback)
 # ---------------------------------------------------------------------------
 
-def fetch_facebook_stats(page_slug: str, api_key: str) -> dict | None:
-    """
-    Scrape Facebook page follower count via ScraperAPI render=true.
-    Returns {"followers": int} or None.
-    """
+def _fetch_facebook_legacy(page_slug: str, api_key: str) -> dict | None:
+    """Scrape Facebook page follower count via ScraperAPI regex. Legacy fallback."""
     url = f"https://www.facebook.com/{page_slug}"
     html = _fetch_via_scraperapi(url, api_key, render=True, premium=True)
     if not html:
         return None
 
     followers = None
-
-    # Pattern 1: "X people follow this" or "X followers"
     m = re.search(r'([\d,.\s]+[KMB]?)\s+(?:people\s+)?follow', html, re.IGNORECASE)
     if m:
         followers = _parse_abbreviated_number(m.group(1))
-
-    # Pattern 2: JSON "follower_count": 12345
     if not followers:
         m = re.search(r'"follower_count"\s*:\s*(\d+)', html)
         if m:
             followers = int(m.group(1))
-
-    # Pattern 3: "X likes" as fallback (page likes ≈ followers)
     if not followers:
         m = re.search(r'([\d,.\s]+[KMB]?)\s+(?:people\s+)?like', html, re.IGNORECASE)
         if m:
             followers = _parse_abbreviated_number(m.group(1))
-
     if not followers:
         return None
-
     return {"followers": followers}
 
 
+def fetch_facebook_stats(page_slug: str, scraperapi_key: str | None, thunderbit_key: str | None) -> dict | None:
+    """Fetch Facebook stats. Tries Thunderbit AI extraction first, falls back to ScraperAPI regex."""
+    if thunderbit_key:
+        url = f"https://www.facebook.com/{page_slug}"
+        result = _thunderbit_extract(url, _FB_SCHEMA, thunderbit_key)
+        if result and result.get("followers"):
+            followers = int(result["followers"])
+            data = {"followers": followers}
+            if result.get("likes"):
+                data["likes"] = int(result["likes"])
+            if result.get("posts_last_7d") is not None:
+                data["posts_last_7d"] = int(result["posts_last_7d"])
+            print(f"    [Thunderbit] Facebook OK")
+            return data
+
+        print(f"    [Thunderbit] Facebook failed, trying ScraperAPI fallback...")
+
+    if scraperapi_key:
+        return _fetch_facebook_legacy(page_slug, scraperapi_key)
+    return None
+
+
 # ---------------------------------------------------------------------------
-# Instagram
+# Instagram — legacy (ScraperAPI + regex fallback)
 # ---------------------------------------------------------------------------
 
-def fetch_instagram_stats(handle: str, api_key: str) -> dict | None:
-    """
-    Scrape Instagram profile follower count via ScraperAPI render=true.
-    Returns {"followers": int} or None.
-    """
+def _fetch_instagram_legacy(handle: str, api_key: str) -> dict | None:
+    """Scrape Instagram profile follower count via ScraperAPI regex. Legacy fallback."""
     url = f"https://www.instagram.com/{handle}/"
     html = _fetch_via_scraperapi(url, api_key, render=True, premium=True)
     if not html:
         return None
 
     followers = None
-
-    # Pattern 1: og:description meta — "123K Followers, 500 Following, 200 Posts"
     m = re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]+)"', html, re.IGNORECASE)
     if not m:
         m = re.search(r'<meta[^>]+content="([^"]+)"[^>]+property="og:description"', html, re.IGNORECASE)
@@ -252,65 +338,94 @@ def fetch_instagram_stats(handle: str, api_key: str) -> dict | None:
         fm = re.search(r'([\d,.]+[KMB]?)\s+Followers', desc, re.IGNORECASE)
         if fm:
             followers = _parse_abbreviated_number(fm.group(1))
-
-    # Pattern 2: JSON interactionStatistic
     if not followers:
         m = re.search(r'"userInteractionCount"\s*:\s*"?(\d+)"?', html)
         if m:
             followers = int(m.group(1))
-
-    # Pattern 3: edge_followed_by count
     if not followers:
         m = re.search(r'"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)\}', html)
         if m:
             followers = int(m.group(1))
-
     if not followers:
         return None
-
     return {"followers": followers}
 
 
+def fetch_instagram_stats(handle: str, scraperapi_key: str | None, thunderbit_key: str | None) -> dict | None:
+    """Fetch Instagram stats. Tries Thunderbit AI extraction first, falls back to ScraperAPI regex."""
+    if thunderbit_key:
+        url = f"https://www.instagram.com/{handle}/"
+        result = _thunderbit_extract(url, _IG_SCHEMA, thunderbit_key)
+        if result and result.get("followers"):
+            followers = int(result["followers"])
+            data = {"followers": followers}
+            if result.get("posts_count") is not None:
+                data["posts_count"] = int(result["posts_count"])
+            if result.get("is_verified") is not None:
+                data["is_verified"] = result["is_verified"]
+            print(f"    [Thunderbit] Instagram OK")
+            return data
+
+        print(f"    [Thunderbit] Instagram failed, trying ScraperAPI fallback...")
+
+    if scraperapi_key:
+        return _fetch_instagram_legacy(handle, scraperapi_key)
+    return None
+
+
 # ---------------------------------------------------------------------------
-# X (Twitter) — ScraperAPI render=true
+# X (Twitter) — legacy (ScraperAPI + regex fallback)
 # ---------------------------------------------------------------------------
 
-def fetch_x_stats(handle: str, api_key: str | None) -> dict | None:
-    """
-    Get X/Twitter follower count via ScraperAPI render=true.
-    Returns {"followers": int} or None.
-    """
-    if not api_key:
-        return None
+def _fetch_x_legacy(handle: str, api_key: str) -> dict | None:
+    """Get X/Twitter follower count via ScraperAPI regex. Legacy fallback."""
     url = f"https://x.com/{handle}"
     html = _fetch_via_scraperapi(url, api_key, render=True, premium=True)
     if not html:
         return None
 
     followers = None
-
-    # Pattern 1: "X Followers" text
     m = re.search(r'([\d,.]+[KMB]?)\s+Followers', html, re.IGNORECASE)
     if m:
         followers = _parse_abbreviated_number(m.group(1))
-
-    # Pattern 2: JSON data
     if not followers:
         m = re.search(r'"followers_count"\s*:\s*(\d+)', html)
         if m:
             followers = int(m.group(1))
-
     if not followers:
         return None
-
     return {"followers": followers}
+
+
+def fetch_x_stats(handle: str, scraperapi_key: str | None, thunderbit_key: str | None) -> dict | None:
+    """Fetch X/Twitter stats. Tries Thunderbit AI extraction first, falls back to ScraperAPI regex."""
+    if thunderbit_key:
+        url = f"https://x.com/{handle}"
+        result = _thunderbit_extract(url, _X_SCHEMA, thunderbit_key)
+        if result and result.get("followers"):
+            followers = int(result["followers"])
+            data = {"followers": followers}
+            if result.get("posts_count") is not None:
+                data["posts_count"] = int(result["posts_count"])
+            if result.get("is_verified") is not None:
+                data["is_verified"] = result["is_verified"]
+            print(f"    [Thunderbit] X OK")
+            return data
+
+        print(f"    [Thunderbit] X failed, trying ScraperAPI fallback...")
+
+    if scraperapi_key:
+        return _fetch_x_legacy(handle, scraperapi_key)
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def _upsert_social(conn, cid: str, platform: str, snapshot_date: str, followers: int):
+def _upsert_social(conn, cid: str, platform: str, snapshot_date: str,
+                    followers: int, posts_last_7d: int | None = None,
+                    engagement_rate: float | None = None, latest_post_url: str | None = None):
     """Delete + insert a social snapshot row and trigger change detection."""
     conn.execute(
         "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? AND snapshot_date=?",
@@ -323,7 +438,7 @@ def _upsert_social(conn, cid: str, platform: str, snapshot_date: str, followers:
              posts_last_7d, engagement_rate, latest_post_url)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (cid, platform, snapshot_date, followers, None, None, None),
+        (cid, platform, snapshot_date, followers, posts_last_7d, engagement_rate, latest_post_url),
     )
     conn.commit()
     detect_change(conn, cid, f"social_{platform}", "followers", str(followers), "low")
@@ -332,9 +447,14 @@ def _upsert_social(conn, cid: str, platform: str, snapshot_date: str, followers:
 async def scrape_all():
     api_key = os.environ.get("YOUTUBE_API_KEY")
     scraperapi_key = os.environ.get("SCRAPERAPI_KEY")
+    thunderbit_key = os.environ.get("THUNDERBIT_API_KEY")
 
     if not api_key:
         print("WARNING: YOUTUBE_API_KEY not set. YouTube scraping will be skipped.")
+    if thunderbit_key:
+        print("Thunderbit API key found — will use AI extraction for FB/IG/X.")
+    else:
+        print("WARNING: THUNDERBIT_API_KEY not set. Will use ScraperAPI regex only.")
     if not scraperapi_key:
         print("WARNING: SCRAPERAPI_KEY not set. Facebook/Instagram/X scraping will be limited.")
 
@@ -399,13 +519,15 @@ async def scrape_all():
             await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
         # --- Facebook ---
-        if fb_slug and scraperapi_key:
+        if fb_slug and (thunderbit_key or scraperapi_key):
             try:
-                fb = fetch_facebook_stats(fb_slug, scraperapi_key)
+                fb = fetch_facebook_stats(fb_slug, scraperapi_key, thunderbit_key)
                 if fb:
-                    _upsert_social(conn, cid, "facebook", snapshot_date, fb["followers"])
+                    _upsert_social(conn, cid, "facebook", snapshot_date,
+                                   fb["followers"], posts_last_7d=fb.get("posts_last_7d"))
                     total_records += 1
-                    print(f"  ✓ Facebook: {fb['followers']:,} followers")
+                    extra = f" | {fb['posts_last_7d']} posts/7d" if fb.get("posts_last_7d") is not None else ""
+                    print(f"  ✓ Facebook: {fb['followers']:,} followers{extra}")
                 else:
                     print(f"  ✗ Facebook: could not extract follower count")
             except Exception as e:
@@ -416,13 +538,15 @@ async def scrape_all():
             await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
         # --- Instagram ---
-        if ig_handle and scraperapi_key:
+        if ig_handle and (thunderbit_key or scraperapi_key):
             try:
-                ig = fetch_instagram_stats(ig_handle, scraperapi_key)
+                ig = fetch_instagram_stats(ig_handle, scraperapi_key, thunderbit_key)
                 if ig:
-                    _upsert_social(conn, cid, "instagram", snapshot_date, ig["followers"])
+                    _upsert_social(conn, cid, "instagram", snapshot_date,
+                                   ig["followers"], posts_last_7d=ig.get("posts_count"))
                     total_records += 1
-                    print(f"  ✓ Instagram: {ig['followers']:,} followers")
+                    extra = f" | {ig['posts_count']} posts" if ig.get("posts_count") is not None else ""
+                    print(f"  ✓ Instagram: {ig['followers']:,} followers{extra}")
                 else:
                     print(f"  ✗ Instagram: could not extract follower count")
             except Exception as e:
@@ -433,13 +557,15 @@ async def scrape_all():
             await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
         # --- X (Twitter) ---
-        if x_handle:
+        if x_handle and (thunderbit_key or scraperapi_key):
             try:
-                x = fetch_x_stats(x_handle, scraperapi_key)
+                x = fetch_x_stats(x_handle, scraperapi_key, thunderbit_key)
                 if x:
-                    _upsert_social(conn, cid, "x", snapshot_date, x["followers"])
+                    _upsert_social(conn, cid, "x", snapshot_date,
+                                   x["followers"], posts_last_7d=x.get("posts_count"))
                     total_records += 1
-                    print(f"  ✓ X: {x['followers']:,} followers")
+                    extra = f" | {x['posts_count']} posts" if x.get("posts_count") is not None else ""
+                    print(f"  ✓ X: {x['followers']:,} followers{extra}")
                 else:
                     print(f"  ✗ X: could not extract follower count")
             except Exception as e:

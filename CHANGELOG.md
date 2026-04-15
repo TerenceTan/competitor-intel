@@ -4,6 +4,50 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [1.4.0] — 2026-04-15
+
+### Added
+
+- **Thunderbit AI extraction for social scraper** — Facebook, Instagram, and X now use Thunderbit's structured AI extraction as the primary method, with ScraperAPI regex as automatic fallback. Richer data: `posts_last_7d` and `posts_count` now populated for FB/IG/X (previously always NULL). Retry logic with backoff (2 attempts, 5s delay) for Thunderbit API calls.
+
+- **`/api/v1/trends` endpoint** — aggregated market intelligence (promo activity, spread direction, reputation moves, AI morning brief) without exposing competitor names. Query params: `days` (1–90) and `market` filter.
+
+- **API documentation** — `docs/API_GUIDE.md` covering `/api/v1/promotions` and `/api/v1/trends` endpoints, authentication, competitor IDs, market codes.
+
+### Fixed
+
+- **Morning brief bullet splitting** — handles abbreviations (e.g. "vs.", "e.g.") and inline `(N)` numbered patterns without false sentence breaks.
+
+- **Empty recommended actions** — AI analyzer `fetch_todays_changes()` switched from calendar-day `LIKE` match to rolling 24h window, fixing missed changes when `run_all.py` straddles midnight UTC. Added 20h deduplication guard to prevent duplicate portfolio insights.
+
+- **Account types junk change events** — widened `_JUNK_PATTERNS` regex to catch trailing text from Claude extraction artifacts. Added junk-to-junk skip so replacing one junk value with another no longer triggers a change event.
+
+- **Account types name flip-flopping** — improved Claude prompt to prefer product names over marketing tiers, added `EXPECTED_ACCOUNTS` name remapping, and 7-day cooldown on change detection to prevent Vantage-style oscillation between "Standard STP" and "Novice Traders".
+
+### Changed
+
+- Social scraper now accepts optional `THUNDERBIT_API_KEY` env var. Without it, behaviour is unchanged (ScraperAPI regex only).
+
+---
+
+## [1.3.0] — 2026-04-10
+
+### Added
+
+- **Noise filtering** — configurable per-domain thresholds (`scrapers/change_thresholds.py`) with percentage and absolute min-delta guards to suppress insignificant change events.
+
+- **Stale-data banner** — top-of-dashboard warning when any scraper data is older than its expected refresh cadence.
+
+- **Pepperstone self-scraping** — removed `is_self` skips so Pepperstone is scraped alongside competitors for benchmarking.
+
+- **KPI sparklines** — 7-day historical trending sparklines on the executive summary KPI row.
+
+- **External API v1** — Bearer token authentication middleware, `/api/v1/promotions` endpoint.
+
+- **Reputation scraper cadence** — reduced from daily to 3-day to match Trustpilot update frequency.
+
+---
+
 ## [1.2.0] — 2026-04-03
 
 ### Added
