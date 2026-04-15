@@ -44,7 +44,7 @@ from db_utils import get_db, log_scraper_run, update_scraper_run, detect_change
 
 SCRAPER_NAME = "social_scraper"
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
-THUNDERBIT_API_URL = "https://open.thunderbit.com/v1/extract"
+THUNDERBIT_API_URL = "https://openapi.thunderbit.com/openapi/v1/extract"
 
 # --- Thunderbit JSON schemas for each platform ---
 _FB_SCHEMA = {
@@ -157,10 +157,10 @@ def _thunderbit_extract(url: str, schema: dict, api_key: str) -> dict | None:
                 result = json.loads(resp.read().decode("utf-8"))
 
             if result.get("success"):
-                data = result.get("data", {}).get("extractedData")
+                data = result.get("data", {}).get("extract")
                 if data:
                     return data
-                print(f"    [Thunderbit] Empty extractedData for {url}")
+                print(f"    [Thunderbit] Empty extract for {url}")
                 return None
 
             print(f"    [Thunderbit] API returned success=false for {url}: {result.get('error', 'unknown')}")
