@@ -91,16 +91,16 @@ def _classify_account_category(account_name: str) -> str:
 # Patterns that indicate "no real data" — Claude sometimes generates these instead of null
 _JUNK_PATTERNS = re.compile(
     r"^("
-    r"unable to (?:determine|find|extract|verify)"
-    r"|not (?:available|specified|mentioned|found|provided|disclosed|stated|listed|applicable)"
+    r"unable to (?:determine|find|extract|verify).*"
+    r"|not (?:available|specified|mentioned|found|provided|disclosed|stated|listed|applicable).*"
     r"|n/?a"
     r"|unknown"
     r"|none"
     r"|varies"
-    r"|see (?:website|page|broker)"
-    r"|contact (?:broker|support)"
-    r"|check (?:website|broker)"
-    r"|no (?:data|info|information)"
+    r"|see (?:website|page|broker).*"
+    r"|contact (?:broker|support).*"
+    r"|check (?:website|broker).*"
+    r"|no (?:data|info|information).*"
     r"|--+"
     r"|—+"
     r"|-"
@@ -877,6 +877,12 @@ def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], 
             old_val = str(old_acc.get(field, "")) if old_acc.get(field) is not None else ""
             new_val = str(new_acc.get(field, "")) if new_acc.get(field) is not None else ""
             if old_val != new_val and (old_val or new_val):
+                # Skip junk-to-junk transitions — Claude rephrasing noise
+                # (e.g. "Unable to determine - no layer1..." → "Unable to determine - no layer2...")
+                old_is_junk = not old_val or bool(_JUNK_PATTERNS.match(old_val))
+                new_is_junk = not new_val or bool(_JUNK_PATTERNS.match(new_val))
+                if old_is_junk and new_is_junk:
+                    continue
                 severity = "high" if field in HIGH_PRIORITY_FIELDS else "medium"
                 detect_change(
                     conn, competitor_id, "account_types",

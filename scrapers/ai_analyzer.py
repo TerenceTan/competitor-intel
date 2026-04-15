@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -153,20 +153,23 @@ INSIGHT_TOOL = {
 def fetch_todays_changes(conn) -> dict[str, list[dict]]:
     """
     Return a dict mapping competitor_id -> list of change_event dicts
-    for events detected today (UTC). Excludes self (Pepperstone).
+    for events detected in the last 24 hours. Excludes self (Pepperstone).
+
+    Uses a rolling 24h window instead of calendar-day match so the AI
+    analyzer picks up changes even when run_all.py straddles midnight UTC.
     """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     rows = conn.execute(
         """
         SELECT ce.competitor_id, ce.domain, ce.field_name, ce.old_value,
                ce.new_value, ce.severity, ce.detected_at
         FROM change_events ce
         JOIN competitors c ON c.id = ce.competitor_id
-        WHERE ce.detected_at LIKE ?
+        WHERE ce.detected_at >= ?
           AND (c.is_self IS NULL OR c.is_self = 0)
         ORDER BY ce.competitor_id, ce.detected_at
         """,
-        (f"{today}%",),
+        (cutoff,),
     ).fetchall()
 
     result: dict[str, list[dict]] = {}
@@ -367,11 +370,23 @@ def run():
     pepperstone_snap = get_pepperstone_snapshot(conn)
     pepperstone_context = build_pepperstone_context(pepperstone_snap)
 
-    # Get today's changes grouped by competitor (excludes Pepperstone)
+    # Deduplication: skip if we already produced a portfolio insight in the last 20h
+    dedup_cutoff = (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()
+    recent_insight = conn.execute(
+        "SELECT id FROM ai_portfolio_insights WHERE generated_at >= ? LIMIT 1",
+        (dedup_cutoff,),
+    ).fetchone()
+    if recent_insight:
+        print("Portfolio insight already generated in the last 20 hours — skipping to avoid duplication.")
+        update_scraper_run(run_id, "success", 0)
+        conn.close()
+        return
+
+    # Get recent changes grouped by competitor (rolling 24h window, excludes Pepperstone)
     todays_changes = fetch_todays_changes(conn)
 
     if not todays_changes:
-        print("No change events detected today. Nothing to analyze.")
+        print("No change events detected in the last 24 hours. Nothing to analyze.")
         update_scraper_run(run_id, "success", 0)
         conn.close()
         return
