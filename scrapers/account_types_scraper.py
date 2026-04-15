@@ -25,7 +25,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 
@@ -242,6 +242,7 @@ Return ONLY a valid JSON array. Each element represents one account type with th
 
 Rules:
 - Extract ALL account types visible on the page — do not skip any
+- CRITICAL: For account_name, use the official PRODUCT name of the account (e.g. "Standard STP", "Raw ECN", "Pro ECN", "Razor", "Zero Spread"), NOT the marketing tier label (e.g. "Beginner", "Novice Traders", "Experienced Traders", "Professional Traders"). Marketing tier labels describe the target audience, not the account product. If both are shown, always prefer the product name. Put the marketing tier in target_audience instead.
 - CRITICAL: Use JSON null for any field not clearly stated on the page. NEVER use phrases like "Unable to determine", "Not available", "N/A", "Not specified", "Unknown", "Varies", "Contact broker", or "See website". If the data is not on the page, the value MUST be null.
 - For commission_structure: "spread_only" = no commission (spreads include markup), "commission_based" = raw/tight spreads + per-lot commission, "hybrid" = both
 - Capture exact text including symbols like $, pips, % — do not normalise
@@ -792,13 +793,26 @@ async def scrape_account_types(page, competitor: dict) -> dict:
         acc_name = acc.get("account_name", "")
         acc["account_category"] = _classify_account_category(acc_name)
 
-    # Validate against expected accounts
+    # Validate and correct account names against expected list.
+    # If Claude extracted marketing tiers instead of product names, and we have
+    # the right number of accounts, remap names to the expected ones.
     expected = EXPECTED_ACCOUNTS.get(cid, [])
     if expected:
-        extracted_names = {a.get("account_name", "").lower() for a in accounts}
-        for exp_name in expected:
-            if not any(exp_name.lower() in en for en in extracted_names):
-                print(f"    [Validate] WARNING: Expected account '{exp_name}' not found for {name}")
+        extracted_names = [a.get("account_name", "") for a in accounts]
+        matched = sum(1 for en in extracted_names if any(exp.lower() in en.lower() for exp in expected))
+
+        if matched == 0 and len(accounts) == len(expected):
+            # Claude likely extracted marketing tiers — remap to expected names
+            print(f"    [Validate] No expected names matched for {name}. Remapping {extracted_names} -> {expected}")
+            for acc, exp_name in zip(accounts, expected):
+                old_name = acc.get("account_name", "")
+                acc["account_name"] = exp_name
+                if old_name and old_name != exp_name:
+                    acc["target_audience"] = old_name  # preserve marketing label
+        else:
+            for exp_name in expected:
+                if not any(exp_name.lower() in en.lower() for en in extracted_names):
+                    print(f"    [Validate] WARNING: Expected account '{exp_name}' not found for {name}")
 
     source_urls = []
     if layer1:
@@ -824,11 +838,33 @@ async def scrape_account_types(page, competitor: dict) -> dict:
 # Change detection for account types
 # ---------------------------------------------------------------------------
 
+_ACCOUNT_CHANGE_COOLDOWN_DAYS = 7
+
 def _detect_account_changes(conn, competitor_id: str, new_accounts: list[dict], broker_name: str, market_code: str = "global"):
     """
     Compare new account types against previous snapshot and detect changes.
     Flags: new_account, removed_account, field_changed.
+
+    Applies a 7-day cooldown: if account_types changes were already registered
+    for this competitor within the last 7 days, skip detection to avoid noise
+    from non-deterministic Claude extraction (e.g. flip-flopping between
+    marketing tier names and product names).
     """
+    # Cooldown: skip if we already registered account_types changes recently
+    cooldown_cutoff = (datetime.now(timezone.utc) - timedelta(days=_ACCOUNT_CHANGE_COOLDOWN_DAYS)).isoformat()
+    recent_changes = conn.execute(
+        """
+        SELECT COUNT(*) as cnt FROM change_events
+        WHERE competitor_id = ? AND domain = 'account_types'
+          AND detected_at >= ? AND market_code = ?
+        """,
+        (competitor_id, cooldown_cutoff, market_code),
+    ).fetchone()
+    if recent_changes and recent_changes["cnt"] > 0:
+        print(f"    [Change] Skipping account_types change detection for {broker_name} — "
+              f"{recent_changes['cnt']} change(s) already registered in the last {_ACCOUNT_CHANGE_COOLDOWN_DAYS} days")
+        return
+
     row = conn.execute(
         """
         SELECT accounts_detailed_json FROM account_type_snapshots
