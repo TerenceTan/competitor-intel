@@ -46,34 +46,24 @@ SCRAPER_NAME = "social_scraper"
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 THUNDERBIT_API_URL = "https://openapi.thunderbit.com/openapi/v1/extract"
 
-# --- Thunderbit JSON schemas for each platform ---
+# --- Thunderbit schemas for each platform ---
+# Thunderbit uses simple {field_name: description} format, not JSON Schema.
 _FB_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "followers": {"type": "number", "description": "Total number of followers or people who follow this page"},
-        "likes": {"type": "number", "description": "Total number of page likes"},
-        "posts_last_7d": {"type": "number", "description": "Number of posts visible on the page published in the last 7 days"},
-    },
+    "followers": "Total number of followers or people who follow this page, as a number",
+    "likes": "Total number of page likes, as a number",
+    "posts_last_7d": "Number of posts published in the last 7 days, as a number",
 }
 
 _IG_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "followers": {"type": "number", "description": "Total number of followers"},
-        "following": {"type": "number", "description": "Number of accounts this profile follows"},
-        "posts_count": {"type": "number", "description": "Total number of posts"},
-        "is_verified": {"type": "boolean", "description": "Whether the account is verified"},
-    },
+    "followers": "Total number of followers, as a number",
+    "posts_count": "Total number of posts, as a number",
+    "is_verified": "Whether the account is verified, true or false",
 }
 
 _X_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "followers": {"type": "number", "description": "Total number of followers"},
-        "following": {"type": "number", "description": "Number of accounts this profile follows"},
-        "posts_count": {"type": "number", "description": "Total number of posts or tweets"},
-        "is_verified": {"type": "boolean", "description": "Whether the account is verified"},
-    },
+    "followers": "Total number of followers, as a number",
+    "posts_count": "Total number of posts or tweets, as a number",
+    "is_verified": "Whether the account is verified, true or false",
 }
 
 _THUNDERBIT_MAX_RETRIES = 2
@@ -140,7 +130,6 @@ def _thunderbit_extract(url: str, schema: dict, api_key: str) -> dict | None:
     payload = {
         "url": url,
         "schema": schema,
-        "timeout": 45000,
     }
 
     for attempt in range(1, _THUNDERBIT_MAX_RETRIES + 1):
