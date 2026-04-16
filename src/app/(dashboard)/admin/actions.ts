@@ -120,11 +120,52 @@ interface DiscoveredConfig {
   android_package: string | null;
 }
 
+/**
+ * Reject URLs that point at private/loopback/link-local hosts or non-HTTP
+ * schemes. This prevents SSRF — without this an admin-authenticated user
+ * (or anyone who reaches the auto-discovery path) could coerce the server
+ * into probing internal services like the EC2 instance metadata endpoint
+ * at 169.254.169.254, or internal RDS/Redis hosts on the VPC.
+ */
+function isPublicHttpUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+  const host = parsed.hostname.toLowerCase();
+  if (!host) return false;
+
+  // Block hostnames that resolve to link-local metadata (Amazon/GCP/Azure
+  // all share 169.254.169.254), loopback, private RFC1918 ranges, and IPv6
+  // equivalents. DNS rebinding is not fully mitigated here — for that we'd
+  // need to resolve and re-check before each request — but this covers the
+  // common literal-IP and plain-hostname cases.
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host === "metadata.google.internal") return false;
+  if (/^127\./.test(host)) return false;
+  if (/^10\./.test(host)) return false;
+  if (/^192\.168\./.test(host)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+  if (/^169\.254\./.test(host)) return false;
+  if (/^0\./.test(host)) return false;
+  if (host === "::1" || host === "[::1]") return false;
+  if (host.startsWith("fc") || host.startsWith("fd")) return false; // IPv6 ULA
+  if (host.startsWith("fe80")) return false; // IPv6 link-local
+
+  return true;
+}
+
 async function fetchHtml(url: string): Promise<string | null> {
+  if (!isPublicHttpUrl(url)) return null;
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; PepperstoneBot/1.0)" },
       signal: AbortSignal.timeout(15000),
+      redirect: "manual", // don't silently follow a redirect into a private host
     });
     if (!res.ok) return null;
     return await res.text();

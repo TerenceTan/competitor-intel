@@ -1,5 +1,8 @@
+# Pin exact versions so scraper behaviour is reproducible across the EC2
+# runtime and local dev, and so a surprise upstream release can't silently
+# break a nightly cron. Bump deliberately and re-test.
 playwright==1.49.0
 feedparser==6.0.11
-anthropic>=0.40.0
-requests>=2.31.0
-python-dotenv>=1.0.0
+anthropic==0.40.0
+requests==2.32.3
+python-dotenv==1.0.1

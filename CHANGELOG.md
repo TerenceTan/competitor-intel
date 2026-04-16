@@ -4,6 +4,20 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [1.4.1] — 2026-04-15
+
+### Security
+
+- **Patched 8 npm advisories** via `npm audit fix` — Next.js (critical cache-key confusion, RCE in RSC flight protocol, SSRF via middleware redirects, multiple DoS vectors), drizzle-orm SQL injection via identifier escaping, path-to-regexp / picomatch ReDoS, flatted prototype pollution, brace-expansion hang, hono/@hono/node-server bypasses. Remaining 4 advisories are dev-only in the `drizzle-kit` → `esbuild` chain and do not ship to production.
+
+- **SSRF hardening in admin auto-discovery** — `fetchHtml()` in `src/app/(dashboard)/admin/actions.ts` now rejects non-HTTP(S) schemes, loopback (`127.0.0.0/8`, `::1`), link-local metadata (`169.254.0.0/16`, including the `169.254.169.254` cloud metadata endpoint), and RFC1918 private ranges before issuing any outbound request. `redirect: "manual"` prevents a public URL from silently redirecting into an internal host.
+
+- **Rate limiting on `/api/v1/*`** — 60 requests/minute per Bearer token (fallback: client IP) via an in-memory fixed-window limiter in `middleware.ts`. Returns `429` with `Retry-After` and `X-RateLimit-*` headers. Moves a leaked API key from "free DoS against the scraper DB" to a bounded, debuggable problem.
+
+- **Pinned Python scraper dependencies** — `scrapers/requirements.txt` now uses exact `==` versions for `anthropic`, `requests`, and `python-dotenv`. Eliminates supply-chain drift between EC2 and local environments on nightly cron runs.
+
+---
+
 ## [1.4.0] — 2026-04-15
 
 ### Added
