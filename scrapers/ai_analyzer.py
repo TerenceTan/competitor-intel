@@ -38,10 +38,10 @@ SCRAPER_NAME = "ai_analyzer"
 PORTFOLIO_TOOL = {
     "name": "record_portfolio_actions",
     "description": (
-        "Record a single consolidated set of recommended actions for Pepperstone "
+        "Record a consolidated set of recommended actions for Pepperstone "
         "after reviewing all competitor intelligence from today. "
-        "De-duplicate and prioritise across all competitors into the most important actions. "
-        "This tool must be called once."
+        "Merge near-duplicate actions into one stronger version (do not drop them). "
+        "This tool must be called once and must return at least 3 actions."
     ),
     "input_schema": {
         "type": "object",
@@ -56,9 +56,14 @@ PORTFOLIO_TOOL = {
             },
             "recommended_actions": {
                 "type": "array",
+                "minItems": 3,
                 "description": (
                     "Prioritised list of concrete actions Pepperstone should take, "
-                    "synthesised across all competitors. Remove duplicates. Aim for 5–10 actions total."
+                    "synthesised across all competitors. Merge near-duplicates into a single "
+                    "stronger action (e.g. if multiple competitors' Trustpilot scores moved, "
+                    "produce one reputation action naming all affected competitors). "
+                    "Return at least 3 actions and up to 10. Never return an empty list — "
+                    "if signals are weak, still produce the 3 most valuable actions."
                 ),
                 "items": {
                     "type": "object",
@@ -288,11 +293,15 @@ Below are today's competitive intelligence reports for each competitor where cha
 
 Your task:
 Synthesise ALL of the above into ONE consolidated, prioritised action plan for Pepperstone.
-- Remove duplicate or near-duplicate actions — keep only the most impactful version.
+- MERGE near-duplicate actions into one stronger action — do NOT drop them.
+  For example, if 3 competitors' Trustpilot scores moved, produce ONE reputation
+  action that names all 3 competitors in the rationale, not 3 separate actions.
 - Elevate urgency where multiple competitors are moving in the same direction.
 - Where relevant, reference specific Pepperstone metrics above (e.g. "our Trustpilot is X vs competitor Y") to make recommendations data-driven.
 - Each action must name the competitor(s) that triggered it in the rationale.
-- Aim for 5–10 actions total, ordered by urgency (immediate first).
+- Return AT LEAST 3 actions and up to 10, ordered by urgency (immediate first).
+- Never return an empty list. If signals are weak, still produce the 3 most
+  valuable actions Pepperstone should take based on the data provided.
 
 Use the record_portfolio_actions tool to return your analysis."""
 
