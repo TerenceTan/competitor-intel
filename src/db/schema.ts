@@ -55,6 +55,7 @@ export const socialSnapshots = sqliteTable("social_snapshots", {
   postsLast7d: integer("posts_last_7d"),
   engagementRate: real("engagement_rate"),
   latestPostUrl: text("latest_post_url"),
+  marketCode: text("market_code").notNull().default("global"),
 });
 
 export const reputationSnapshots = sqliteTable("reputation_snapshots", {
@@ -68,6 +69,17 @@ export const reputationSnapshots = sqliteTable("reputation_snapshots", {
   androidRating: real("android_rating"),
   entitiesBreakdownJson: text("entities_breakdown_json"),
   myfxbookRating: real("myfxbook_rating"),
+});
+
+export const appStoreSnapshots = sqliteTable("app_store_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  competitorId: text("competitor_id").notNull().references(() => competitors.id),
+  entityLabel: text("entity_label"),
+  iosAppId: text("ios_app_id").notNull(),
+  marketCode: text("market_code").notNull(),
+  snapshotDate: text("snapshot_date").notNull(),
+  iosRating: real("ios_rating"),
+  iosRatingCount: integer("ios_rating_count"),
 });
 
 export const wikifxSnapshots = sqliteTable("wikifx_snapshots", {

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { safeParseJson } from "@/lib/utils";
 import { db } from "@/db";
 import {
@@ -9,19 +9,25 @@ import {
   aiInsights,
 } from "@/db/schema";
 import { eq, or, isNull, sql } from "drizzle-orm";
+import { parseMarketParam } from "@/lib/markets";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const market = parseMarketParam(request.nextUrl.searchParams.get("market"));
+  const promoMarketSql = market ? sql`AND market_code = ${market}` : sql``;
+  const pricingMarketSql = market ? sql`AND market_code = ${market}` : sql``;
+
   const allCompetitors = await db
     .select()
     .from(competitors)
     .where(or(eq(competitors.isSelf, 0), isNull(competitors.isSelf)));
 
-  // Batch fetch latest snapshots for all competitors in 4 queries (not N*4)
+  // Batch fetch latest snapshots for all competitors in 4 queries (not N*4).
+  // Pricing & promos respect the market filter; reputation/insights remain global.
   const [latestPricing, latestReputation, latestPromos, latestInsights] = await Promise.all([
     db
       .select()
       .from(pricingSnapshots)
-      .where(sql`${pricingSnapshots.id} IN (SELECT MAX(id) FROM pricing_snapshots GROUP BY competitor_id)`),
+      .where(sql`${pricingSnapshots.id} IN (SELECT MAX(id) FROM pricing_snapshots WHERE 1=1 ${pricingMarketSql} GROUP BY competitor_id)`),
     db
       .select()
       .from(reputationSnapshots)
@@ -29,7 +35,7 @@ export async function GET() {
     db
       .select()
       .from(promoSnapshots)
-      .where(sql`${promoSnapshots.id} IN (SELECT MAX(id) FROM promo_snapshots GROUP BY competitor_id)`),
+      .where(sql`${promoSnapshots.id} IN (SELECT MAX(id) FROM promo_snapshots WHERE 1=1 ${promoMarketSql} GROUP BY competitor_id)`),
     db
       .select()
       .from(aiInsights)

@@ -24,8 +24,20 @@ import { MorningBrief } from "@/components/charts/morning-brief";
 import { ReputationLeaderboard } from "@/components/charts/reputation-leaderboard";
 import { SeverityDonut } from "@/components/charts/severity-donut";
 import { SCRAPERS } from "@/lib/constants";
+import { parseMarketParam, MARKET_NAMES } from "@/lib/markets";
 
-export default async function ExecutiveSummaryPage() {
+export default async function ExecutiveSummaryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ market?: string }>;
+}) {
+  const sp = await searchParams;
+  const market = parseMarketParam(sp.market);
+  // Promo & social queries respect the selected market when one is set;
+  // social falls back to the global row when no per-market handle exists.
+  const promoMarketSql = market
+    ? sql`AND market_code = ${market}`
+    : sql``;
   const now = Date.now();
   const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
   const twoWeeksAgo = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString();
@@ -85,12 +97,26 @@ export default async function ExecutiveSummaryPage() {
     // Latest reputation per competitor
     db.select().from(reputationSnapshots)
       .where(sql`${reputationSnapshots.id} IN (SELECT MAX(id) FROM reputation_snapshots GROUP BY competitor_id)`),
-    // Latest social per competitor per platform
-    db.select().from(socialSnapshots)
-      .where(sql`${socialSnapshots.id} IN (SELECT MAX(id) FROM social_snapshots GROUP BY competitor_id, platform)`),
-    // Latest promos per competitor
+    // Latest social per (competitor, platform). When a market is selected we
+    // fetch BOTH the latest per-market and latest global rows, then dedup in JS
+    // (prefer per-market) — that way a brand with no per-market profile still
+    // shows up via its global handle.
+    market
+      ? db.select().from(socialSnapshots).where(sql`${socialSnapshots.id} IN (
+          SELECT MAX(id) FROM social_snapshots
+          WHERE market_code = ${market}
+          GROUP BY competitor_id, platform
+        ) OR ${socialSnapshots.id} IN (
+          SELECT MAX(id) FROM social_snapshots
+          WHERE market_code = 'global'
+          GROUP BY competitor_id, platform
+        )`)
+      : db.select().from(socialSnapshots).where(sql`${socialSnapshots.id} IN (
+          SELECT MAX(id) FROM social_snapshots WHERE market_code = 'global' GROUP BY competitor_id, platform
+        )`),
+    // Latest promos per competitor (filtered by market when selected)
     db.select().from(promoSnapshots)
-      .where(sql`${promoSnapshots.id} IN (SELECT MAX(id) FROM promo_snapshots GROUP BY competitor_id)`),
+      .where(sql`${promoSnapshots.id} IN (SELECT MAX(id) FROM promo_snapshots WHERE 1=1 ${promoMarketSql} GROUP BY competitor_id)`),
     // Latest pricing per competitor
     db.select().from(pricingSnapshots)
       .where(sql`${pricingSnapshots.id} IN (SELECT MAX(id) FROM pricing_snapshots GROUP BY competitor_id)`),
@@ -115,10 +141,14 @@ export default async function ExecutiveSummaryPage() {
       count: sql<number>`SUM(json_array_length(${promoSnapshots.promotionsJson}))`,
     })
       .from(promoSnapshots)
-      .where(gte(promoSnapshots.snapshotDate, thirtyDaysAgo.split("T")[0]))
+      .where(and(
+        gte(promoSnapshots.snapshotDate, thirtyDaysAgo.split("T")[0]),
+        ...(market ? [eq(promoSnapshots.marketCode, market)] : []),
+      ))
       .groupBy(promoSnapshots.snapshotDate)
       .orderBy(promoSnapshots.snapshotDate),
-    // Sparkline: Pepperstone total followers over last 30 days
+    // Sparkline: Pepperstone total followers over last 30 days.
+    // When a market is selected, prefer per-market rows; else global only.
     db.select({
       date: socialSnapshots.snapshotDate,
       total: sql<number>`SUM(${socialSnapshots.followers})`,
@@ -127,6 +157,9 @@ export default async function ExecutiveSummaryPage() {
       .where(and(
         sql`${socialSnapshots.competitorId} = (SELECT id FROM competitors WHERE is_self = 1 LIMIT 1)`,
         gte(socialSnapshots.snapshotDate, thirtyDaysAgo.split("T")[0]),
+        market
+          ? sql`${socialSnapshots.marketCode} IN (${market}, 'global')`
+          : eq(socialSnapshots.marketCode, "global"),
       ))
       .groupBy(socialSnapshots.snapshotDate)
       .orderBy(socialSnapshots.snapshotDate),
@@ -166,9 +199,23 @@ export default async function ExecutiveSummaryPage() {
   const promoChangesThisWeek = changesByCompDomain.filter((c) => c.domain === "promotions").reduce((sum, c) => sum + c.count, 0);
   const prevPromoCount = Math.max(0, currentPromoCount - promoChangesThisWeek);
 
-  // KPI: Social share of voice
-  const socialByCompetitor = new Map<string, number>();
+  // KPI: Social share of voice. With per-market + global rows in the result
+  // set, dedup per (competitor, platform) preferring the per-market row.
+  const socialPerKey = new Map<string, typeof allLatestSocial[number]>();
   for (const s of allLatestSocial) {
+    const key = `${s.competitorId}|${s.platform}`;
+    const existing = socialPerKey.get(key);
+    if (!existing) {
+      socialPerKey.set(key, s);
+      continue;
+    }
+    // Prefer per-market over global
+    if (existing.marketCode === "global" && s.marketCode !== "global") {
+      socialPerKey.set(key, s);
+    }
+  }
+  const socialByCompetitor = new Map<string, number>();
+  for (const s of socialPerKey.values()) {
     socialByCompetitor.set(s.competitorId, (socialByCompetitor.get(s.competitorId) ?? 0) + (s.followers ?? 0));
   }
   const totalSocialAll = Array.from(socialByCompetitor.values()).reduce((a, b) => a + b, 0);
@@ -282,6 +329,13 @@ export default async function ExecutiveSummaryPage() {
         <p className="text-gray-500 text-sm mt-1">
           Morning brief — competitive intelligence overview for APAC markets
         </p>
+        {market && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            Promos & social: {MARKET_NAMES[market]}
+            <span className="text-primary/60">— Trustpilot remains global</span>
+          </div>
+        )}
       </div>
 
       {/* ===== ACT 1: WHAT HAPPENED? ===== */}

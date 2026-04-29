@@ -86,12 +86,34 @@ def get_db() -> sqlite3.Connection:
         pass  # column already exists
 
     # Additive migration: market_code column for market-level localisation
-    for table in ("pricing_snapshots", "promo_snapshots", "account_type_snapshots", "change_events"):
+    for table in ("pricing_snapshots", "promo_snapshots", "account_type_snapshots", "change_events", "social_snapshots"):
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN market_code TEXT NOT NULL DEFAULT 'global'")
             conn.commit()
         except Exception:
             pass  # column already exists
+
+    # Per-country App Store ratings (iOS only — Apple's lookup API segments by country).
+    # Reputation snapshot keeps the global view; this table holds the per-market breakdown
+    # for SG/MY/TH/etc. so country teams can see ratings for their App Store storefront.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_store_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            competitor_id TEXT NOT NULL REFERENCES competitors(id),
+            entity_label TEXT,
+            ios_app_id TEXT NOT NULL,
+            market_code TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            ios_rating REAL,
+            ios_rating_count INTEGER,
+            UNIQUE (competitor_id, ios_app_id, market_code, snapshot_date)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_app_store_competitor_market
+        ON app_store_snapshots (competitor_id, market_code)
+    """)
+    conn.commit()
 
     # Additive migration: scraper_config + market_config columns for DB-driven competitor config
     for col in ("scraper_config", "market_config"):
@@ -302,12 +324,15 @@ def get_all_brokers() -> list:
                 # No DB config yet — skip (fallback handled by caller)
                 continue
             config = json.loads(raw_config)
+            raw_market_config = row["market_config"]
+            market_config = json.loads(raw_market_config) if raw_market_config else {}
             broker = {
                 "id": row["id"],
                 "name": row["name"],
                 "tier": row["tier"],
                 "website": row["website"],
                 "is_self": bool(row["is_self"]),
+                "market_config": market_config,
                 **config,
             }
             brokers.append(broker)

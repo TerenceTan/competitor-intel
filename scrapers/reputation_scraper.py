@@ -223,28 +223,66 @@ async def scrape_google_play_search(page, broker_name: str) -> float | None:
     return rating
 
 
-def scrape_app_store_direct(ios_app_id: str) -> float | None:
+def scrape_app_store_per_market(ios_app_id: str) -> dict[str, dict]:
     """
-    Lookup App Store rating directly by app ID using iTunes lookup API.
-    Tries multiple storefronts since many forex broker apps are only published
-    in SEA markets (th, sg) rather than au.
+    Lookup App Store rating per country using iTunes lookup API.
+    Apple segments ratings per storefront, so a forex broker app may have
+    different ratings across SG/MY/TH/etc. — return one entry per country
+    that returned a result.
+
+    Returns:
+        {country_code: {"rating": float, "count": int|None}, ...}
+        Empty dict if no country returned data.
     """
-    for country in ["th", "sg", "gb", "us", "au"]:
+    from market_config import PRIORITY_MARKETS
+
+    # Probe priority APAC markets plus the legacy en-stores in case the app
+    # is only published in those (e.g. /us, /gb).
+    countries = list(PRIORITY_MARKETS) + ["gb", "us", "au"]
+    out: dict[str, dict] = {}
+
+    for country in countries:
         try:
             url = f"https://itunes.apple.com/lookup?id={ios_app_id}&country={country}"
             resp = requests.get(url, timeout=15, headers={"Accept": "application/json"})
             resp.raise_for_status()
             data = resp.json()
             results = data.get("results", [])
-            if results:
-                r = results[0]
-                avg = r.get("averageUserRating") or r.get("averageUserRatingForCurrentVersion")
-                if avg:
-                    return float(avg)
+            if not results:
+                continue
+            r = results[0]
+            avg = r.get("averageUserRating") or r.get("averageUserRatingForCurrentVersion")
+            if avg is None:
+                continue
+            count = (
+                r.get("userRatingCount")
+                or r.get("userRatingCountForCurrentVersion")
+            )
+            out[country] = {"rating": float(avg), "count": int(count) if count else None}
         except Exception as e:
             print(f"    [App Store] Error for app ID {ios_app_id} (country={country}): {e}")
 
-    return None
+    return out
+
+
+def scrape_app_store_direct(ios_app_id: str) -> float | None:
+    """
+    Backwards-compatible wrapper: returns a single representative rating for
+    `reputation_snapshots.ios_rating` (the global column). Picks the SG storefront
+    when available, else the highest-volume storefront, else any rating found.
+    """
+    per_market = scrape_app_store_per_market(ios_app_id)
+    if not per_market:
+        return None
+    if "sg" in per_market:
+        return per_market["sg"]["rating"]
+    # Pick the storefront with the most reviews
+    best = max(
+        per_market.values(),
+        key=lambda v: v.get("count") or 0,
+        default=None,
+    )
+    return best["rating"] if best else None
 
 
 def scrape_myfxbook_rating(myfxbook_slug: str) -> float | None:
@@ -394,6 +432,8 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
         "fpa_rating": None,
         "ios_rating": None,
         "android_rating": None,
+        "ios_app_id": ios_app_id,
+        "ios_per_market": {},
         "errors": [],
     }
 
@@ -437,10 +477,18 @@ async def scrape_entity(page, entity: dict, broker_name: str) -> dict:
     # --- App Store ---
     try:
         if ios_app_id:
-            result["ios_rating"] = scrape_app_store_direct(ios_app_id)
+            per_market = scrape_app_store_per_market(ios_app_id)
+            result["ios_per_market"] = per_market
+            # Pick a single representative rating for the global reputation_snapshots row
+            if per_market:
+                primary = per_market.get("sg") or max(
+                    per_market.values(),
+                    key=lambda v: v.get("count") or 0,
+                )
+                result["ios_rating"] = primary["rating"]
         else:
             result["ios_rating"] = scrape_app_store_search(broker_name)
-        print(f"      [{label}] App Store: rating={result['ios_rating']}")
+        print(f"      [{label}] App Store: rating={result['ios_rating']} ({len(result['ios_per_market'])} markets)")
     except Exception as e:
         msg = f"{label}/app-store: {e}"
         print(f"      [{label}] App Store error: {e}")
@@ -551,6 +599,30 @@ async def scrape_all():
                     (cid, snapshot_date, tp_score, tp_count, fpa_rating, ios_rating,
                      android_rating, entities_breakdown_json, myfxbook_rating),
                 )
+
+                # Per-market App Store ratings — one row per (entity, country) that returned data
+                conn.execute(
+                    "DELETE FROM app_store_snapshots WHERE competitor_id=? AND snapshot_date=?",
+                    (cid, snapshot_date),
+                )
+                for er in entity_results:
+                    er_label = er.get("label")
+                    er_app_id = er.get("ios_app_id")
+                    er_per_market = er.get("ios_per_market") or {}
+                    if not er_app_id or not er_per_market:
+                        continue
+                    for country_code, payload in er_per_market.items():
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO app_store_snapshots
+                                (competitor_id, entity_label, ios_app_id, market_code,
+                                 snapshot_date, ios_rating, ios_rating_count)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (cid, er_label, er_app_id, country_code, snapshot_date,
+                             payload.get("rating"), payload.get("count")),
+                        )
+
                 conn.commit()
                 total_records += 1
 

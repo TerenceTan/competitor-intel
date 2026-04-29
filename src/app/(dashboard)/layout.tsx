@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { MobileHeader } from "@/components/layout/mobile-header";
 import { BetaBar } from "@/components/layout/beta-bar";
 import { StaleDataBanner } from "@/components/layout/stale-data-banner";
+import { MarketSelector } from "@/components/layout/market-selector";
 import { formatDateTime } from "@/lib/utils";
 
 // Dashboard pages query the SQLite DB at render time — never prerender statically
@@ -51,6 +52,7 @@ export default async function DashboardLayout({
         >
           <MobileHeader competitorCount={competitorCount} />
           <div className="flex items-center gap-4 text-sm text-gray-500">
+            <MarketSelector />
             <span>
               Data as of:{" "}
               <span className="text-gray-700">

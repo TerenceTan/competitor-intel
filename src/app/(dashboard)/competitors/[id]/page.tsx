@@ -6,13 +6,15 @@ import {
   promoSnapshots,
   socialSnapshots,
   reputationSnapshots,
+  appStoreSnapshots,
   newsItems,
   changeEvents,
   wikifxSnapshots,
   accountTypeSnapshots,
 } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { parseMarketParam, MARKET_NAMES } from "@/lib/markets";
 import {
   Tabs,
   TabsList,
@@ -62,10 +64,14 @@ import { PLATFORMS } from "@/lib/constants";
 
 export default async function CompetitorDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ market?: string }>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
+  const market = parseMarketParam(sp.market);
 
   const [competitor] = await db
     .select()
@@ -106,7 +112,10 @@ export default async function CompetitorDetailPage({
     db
       .select()
       .from(promoSnapshots)
-      .where(eq(promoSnapshots.competitorId, id))
+      .where(and(
+        eq(promoSnapshots.competitorId, id),
+        ...(market ? [eq(promoSnapshots.marketCode, market)] : []),
+      ))
       .orderBy(desc(promoSnapshots.snapshotDate), desc(promoSnapshots.id))
       .limit(1)
       .then((r) => r[0] ?? null),
@@ -155,6 +164,25 @@ export default async function CompetitorDetailPage({
       .limit(1)
       .then((r) => r[0] ?? null),
   ]);
+
+  // Per-market App Store ratings for the iOS card.
+  // When a market is selected, fetch the latest rating in that storefront;
+  // otherwise leave the global iosRating from reputation_snapshots.
+  const appStoreRows = await db
+    .select()
+    .from(appStoreSnapshots)
+    .where(and(
+      eq(appStoreSnapshots.competitorId, id),
+      ...(market ? [eq(appStoreSnapshots.marketCode, market)] : []),
+    ))
+    .orderBy(desc(appStoreSnapshots.snapshotDate), desc(appStoreSnapshots.id))
+    .limit(market ? 5 : 30);
+  const marketAppStoreRating = market
+    ? (appStoreRows[0]?.iosRating ?? null)
+    : null;
+  const marketAppStoreReviews = market
+    ? (appStoreRows[0]?.iosRatingCount ?? null)
+    : null;
 
   // Parse JSON fields
   let keyFindings: Array<{ finding: string; severity: string; evidence?: string }> = [];
@@ -229,12 +257,25 @@ export default async function CompetitorDetailPage({
     if (leverages.length > 0) wikifxMaxLeverage = leverages[0];
   }
 
-  // Build social map (latest per platform)
+  // Build social map (latest per platform). When a market is selected, prefer
+  // a per-market snapshot if one exists; otherwise fall back to the global row.
   const socialMap: Record<string, typeof socialData[0]> = {};
+  if (market) {
+    for (const snap of socialData) {
+      if (snap.marketCode === market && !socialMap[snap.platform]) {
+        socialMap[snap.platform] = snap;
+      }
+    }
+  }
   for (const snap of socialData) {
-    if (!socialMap[snap.platform]) {
+    if (!socialMap[snap.platform] && snap.marketCode === "global") {
       socialMap[snap.platform] = snap;
     }
+  }
+  // Track which platforms came from a per-market override so the UI can label them
+  const socialMarketOverride: Record<string, boolean> = {};
+  for (const platform of Object.keys(socialMap)) {
+    socialMarketOverride[platform] = market != null && socialMap[platform].marketCode === market;
   }
 
   const tierColors: Record<number, string> = {
@@ -265,6 +306,12 @@ export default async function CompetitorDetailPage({
           >
             {competitor.website}
           </a>
+          {market && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+              Promos, App Store, social: {MARKET_NAMES[market]}
+            </div>
+          )}
         </div>
       </div>
 
@@ -733,14 +780,26 @@ export default async function CompetitorDetailPage({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {PLATFORMS.map((platform) => {
               const snap = socialMap[platform];
+              const isPerMarket = socialMarketOverride[platform];
               return (
                 <Card
                   key={platform}
                   className="p-5 border-gray-200 bg-white"
                 >
-                  <h4 className="text-gray-900 font-medium capitalize mb-3">
-                    {platform}
-                  </h4>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-gray-900 font-medium capitalize">
+                      {platform}
+                    </h4>
+                    {market && (
+                      <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                        isPerMarket
+                          ? "border-primary/30 bg-primary/5 text-primary"
+                          : "border-gray-200 bg-gray-50 text-gray-500"
+                      }`}>
+                        {isPerMarket ? `${MARKET_NAMES[market]} profile` : "Global"}
+                      </span>
+                    )}
+                  </div>
                   {!snap ? (
                     <p className="text-gray-400 text-sm">
                       N/A — Data unavailable
@@ -797,10 +856,12 @@ export default async function CompetitorDetailPage({
                 count: null,
               },
               {
-                label: "App Store (iOS)",
-                value: latestReputation?.iosRating,
+                label: market
+                  ? `App Store — ${MARKET_NAMES[market]}`
+                  : "App Store (iOS)",
+                value: market ? marketAppStoreRating : latestReputation?.iosRating,
                 suffix: "/5",
-                count: null,
+                count: market ? marketAppStoreReviews : null,
               },
               {
                 label: "Google Play",

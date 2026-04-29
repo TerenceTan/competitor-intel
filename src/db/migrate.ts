@@ -166,13 +166,29 @@ export function runMigrations() {
   }
 
   // market_code column — market-level localisation for APAC scraping
-  for (const table of ["pricing_snapshots", "promo_snapshots", "account_type_snapshots", "change_events"]) {
+  for (const table of ["pricing_snapshots", "promo_snapshots", "account_type_snapshots", "change_events", "social_snapshots"]) {
     try {
       sqlite.exec(`ALTER TABLE ${table} ADD COLUMN market_code TEXT NOT NULL DEFAULT 'global'`);
     } catch {
       // Column already exists — ignore
     }
   }
+
+  // Per-country App Store ratings — Apple's lookup API segments by storefront,
+  // so a broker's iOS app can have different ratings in SG vs MY vs TH.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS app_store_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    competitor_id TEXT NOT NULL REFERENCES competitors(id),
+    entity_label TEXT,
+    ios_app_id TEXT NOT NULL,
+    market_code TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    ios_rating REAL,
+    ios_rating_count INTEGER,
+    UNIQUE (competitor_id, ios_app_id, market_code, snapshot_date)
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_app_store_competitor_market
+    ON app_store_snapshots (competitor_id, market_code)`);
 
   // scraper_config + market_config columns — DB-driven competitor configuration
   for (const col of ["scraper_config", "market_config"]) {

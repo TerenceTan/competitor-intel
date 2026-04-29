@@ -73,15 +73,16 @@ _THUNDERBIT_RETRY_DELAY = 5  # seconds
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_via_scraperapi(url: str, api_key: str, render: bool = True, premium: bool = False) -> str | None:
+def _fetch_via_scraperapi(url: str, api_key: str, render: bool = True, premium: bool = False, country_code: str | None = None) -> str | None:
     """Fetch a URL through ScraperAPI. Returns HTML string or None on failure."""
     api_url = (
         f"http://api.scraperapi.com"
         f"?api_key={api_key}"
         f"&url={url}"
         f"&render={'true' if render else 'false'}"
-        f"&country_code=my"
     )
+    if country_code:
+        api_url += f"&country_code={country_code}"
     if premium:
         api_url += "&premium=true"
     try:
@@ -418,23 +419,65 @@ def fetch_x_stats(handle: str, scraperapi_key: str | None, thunderbit_key: str |
 
 def _upsert_social(conn, cid: str, platform: str, snapshot_date: str,
                     followers: int, posts_last_7d: int | None = None,
-                    engagement_rate: float | None = None, latest_post_url: str | None = None):
+                    engagement_rate: float | None = None, latest_post_url: str | None = None,
+                    market_code: str = "global"):
     """Delete + insert a social snapshot row and trigger change detection."""
     conn.execute(
-        "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? AND snapshot_date=?",
-        (cid, platform, snapshot_date),
+        "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? AND market_code=? AND snapshot_date=?",
+        (cid, platform, market_code, snapshot_date),
     )
     conn.execute(
         """
         INSERT INTO social_snapshots
             (competitor_id, platform, snapshot_date, followers,
-             posts_last_7d, engagement_rate, latest_post_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+             posts_last_7d, engagement_rate, latest_post_url, market_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (cid, platform, snapshot_date, followers, posts_last_7d, engagement_rate, latest_post_url),
+        (cid, platform, snapshot_date, followers, posts_last_7d, engagement_rate, latest_post_url, market_code),
     )
     conn.commit()
-    detect_change(conn, cid, f"social_{platform}", "followers", str(followers), "low")
+    # Per-market change detection — fold market into the field name so SG vs global
+    # follower swings stay distinct in the change feed.
+    field_suffix = "" if market_code == "global" else f"_{market_code}"
+    detect_change(conn, cid, f"social_{platform}", f"followers{field_suffix}", str(followers), "low")
+
+
+def get_market_social_handles(competitor: dict) -> dict[str, dict]:
+    """
+    Returns {market_code: {handle_key: value}} for every market that has a
+    social handle override that differs from the competitor's global handle.
+    Always includes a "global" entry with the default handles.
+
+    A competitor with no overrides returns just {"global": {...}}.
+    """
+    from market_config import PRIORITY_MARKETS
+
+    global_handles = {
+        "facebook_slug": competitor.get("facebook_slug"),
+        "instagram_handle": competitor.get("instagram_handle"),
+        "x_handle": competitor.get("x_handle"),
+        "youtube_query": competitor.get("youtube_query"),
+    }
+    out: dict[str, dict] = {"global": global_handles}
+
+    market_config = competitor.get("market_config") or {}
+    if isinstance(market_config, str):
+        try:
+            market_config = json.loads(market_config)
+        except Exception:
+            market_config = {}
+
+    for market in PRIORITY_MARKETS:
+        cfg = market_config.get(market) or {}
+        per_market: dict[str, str] = {}
+        for key in ("facebook_slug", "instagram_handle", "x_handle", "youtube_query"):
+            override = cfg.get(key)
+            if override and override != global_handles.get(key):
+                per_market[key] = override
+        if per_market:
+            out[market] = per_market
+
+    return out
 
 
 async def scrape_all():
@@ -472,101 +515,103 @@ async def scrape_all():
     for competitor in brokers:
         cid = competitor["id"]
         name = competitor["name"]
-        yt_query = competitor.get("youtube_query", f"{name} trading")
-        fb_slug = competitor.get("facebook_slug")
-        ig_handle = competitor.get("instagram_handle")
-        x_handle = competitor.get("x_handle")
 
-        print(f"\nProcessing {name}...")
+        # Build per-market handle map. Always has a "global" entry; only adds per-market
+        # entries when an override differs from global, so we don't duplicate-scrape.
+        markets_handles = get_market_social_handles(competitor)
 
-        # --- YouTube ---
-        if api_key:
-            try:
-                yt = fetch_youtube_stats(name, yt_query, api_key)
-                if yt:
-                    conn.execute(
-                        "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? AND snapshot_date=?",
-                        (cid, "youtube", snapshot_date),
-                    )
-                    conn.execute(
-                        """
-                        INSERT INTO social_snapshots
-                            (competitor_id, platform, snapshot_date, followers,
-                             posts_last_7d, engagement_rate, latest_post_url)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (cid, "youtube", snapshot_date, yt["subscribers"],
-                         yt["videos_last_7d"], None, yt["latest_video_url"]),
-                    )
-                    conn.commit()
-                    total_records += 1
-                    detect_change(conn, cid, "social_youtube", "subscribers", str(yt["subscribers"]), "low")
-                    print(f"  ✓ YouTube: {yt['subscribers']:,} subs | {yt['videos_last_7d']} videos last 7d")
-                else:
-                    print(f"  ✗ YouTube: no channel found")
-            except Exception as e:
-                msg = f"{name} youtube: {e}"
-                print(f"  ✗ YouTube: {e}")
-                error_summary.append(msg)
+        print(f"\nProcessing {name} ({len(markets_handles)} market{'s' if len(markets_handles) != 1 else ''})...")
 
-            await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+        for market_code, handles in markets_handles.items():
+            yt_query = handles.get("youtube_query") or f"{name} trading"
+            fb_slug = handles.get("facebook_slug")
+            ig_handle = handles.get("instagram_handle")
+            x_handle = handles.get("x_handle")
 
-        # --- Facebook ---
-        if fb_slug and (thunderbit_key or scraperapi_key):
-            try:
-                fb = fetch_facebook_stats(fb_slug, scraperapi_key, thunderbit_key)
-                if fb:
-                    _upsert_social(conn, cid, "facebook", snapshot_date,
-                                   fb["followers"], posts_last_7d=fb.get("posts_last_7d"))
-                    total_records += 1
-                    extra = f" | {fb['posts_last_7d']} posts/7d" if fb.get("posts_last_7d") is not None else ""
-                    print(f"  ✓ Facebook: {fb['followers']:,} followers{extra}")
-                else:
-                    print(f"  ✗ Facebook: could not extract follower count")
-            except Exception as e:
-                msg = f"{name} facebook: {e}"
-                print(f"  ✗ Facebook: {e}")
-                error_summary.append(msg)
+            market_label = "" if market_code == "global" else f" [{market_code}]"
 
-            await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+            # --- YouTube ---
+            if api_key and yt_query:
+                try:
+                    yt = fetch_youtube_stats(name, yt_query, api_key)
+                    if yt:
+                        _upsert_social(
+                            conn, cid, "youtube", snapshot_date,
+                            yt["subscribers"],
+                            posts_last_7d=yt["videos_last_7d"],
+                            latest_post_url=yt["latest_video_url"],
+                            market_code=market_code,
+                        )
+                        total_records += 1
+                        print(f"  ✓ YouTube{market_label}: {yt['subscribers']:,} subs | {yt['videos_last_7d']} videos last 7d")
+                    else:
+                        print(f"  ✗ YouTube{market_label}: no channel found")
+                except Exception as e:
+                    msg = f"{name} youtube{market_label}: {e}"
+                    print(f"  ✗ YouTube{market_label}: {e}")
+                    error_summary.append(msg)
 
-        # --- Instagram ---
-        if ig_handle and (thunderbit_key or scraperapi_key):
-            try:
-                ig = fetch_instagram_stats(ig_handle, scraperapi_key, thunderbit_key)
-                if ig:
-                    _upsert_social(conn, cid, "instagram", snapshot_date,
-                                   ig["followers"], posts_last_7d=ig.get("posts_count"))
-                    total_records += 1
-                    extra = f" | {ig['posts_count']} posts" if ig.get("posts_count") is not None else ""
-                    print(f"  ✓ Instagram: {ig['followers']:,} followers{extra}")
-                else:
-                    print(f"  ✗ Instagram: could not extract follower count")
-            except Exception as e:
-                msg = f"{name} instagram: {e}"
-                print(f"  ✗ Instagram: {e}")
-                error_summary.append(msg)
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
-            await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+            # --- Facebook ---
+            if fb_slug and (thunderbit_key or scraperapi_key):
+                try:
+                    fb = fetch_facebook_stats(fb_slug, scraperapi_key, thunderbit_key)
+                    if fb:
+                        _upsert_social(conn, cid, "facebook", snapshot_date,
+                                       fb["followers"], posts_last_7d=fb.get("posts_last_7d"),
+                                       market_code=market_code)
+                        total_records += 1
+                        extra = f" | {fb['posts_last_7d']} posts/7d" if fb.get("posts_last_7d") is not None else ""
+                        print(f"  ✓ Facebook{market_label}: {fb['followers']:,} followers{extra}")
+                    else:
+                        print(f"  ✗ Facebook{market_label}: could not extract follower count")
+                except Exception as e:
+                    msg = f"{name} facebook{market_label}: {e}"
+                    print(f"  ✗ Facebook{market_label}: {e}")
+                    error_summary.append(msg)
 
-        # --- X (Twitter) ---
-        if x_handle and (thunderbit_key or scraperapi_key):
-            try:
-                x = fetch_x_stats(x_handle, scraperapi_key, thunderbit_key)
-                if x:
-                    _upsert_social(conn, cid, "x", snapshot_date,
-                                   x["followers"], posts_last_7d=x.get("posts_count"))
-                    total_records += 1
-                    extra = f" | {x['posts_count']} posts" if x.get("posts_count") is not None else ""
-                    print(f"  ✓ X: {x['followers']:,} followers{extra}")
-                else:
-                    print(f"  ✗ X: could not extract follower count")
-            except Exception as e:
-                msg = f"{name} x: {e}"
-                print(f"  ✗ X: {e}")
-                error_summary.append(msg)
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
-            await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+            # --- Instagram ---
+            if ig_handle and (thunderbit_key or scraperapi_key):
+                try:
+                    ig = fetch_instagram_stats(ig_handle, scraperapi_key, thunderbit_key)
+                    if ig:
+                        _upsert_social(conn, cid, "instagram", snapshot_date,
+                                       ig["followers"], posts_last_7d=ig.get("posts_count"),
+                                       market_code=market_code)
+                        total_records += 1
+                        extra = f" | {ig['posts_count']} posts" if ig.get("posts_count") is not None else ""
+                        print(f"  ✓ Instagram{market_label}: {ig['followers']:,} followers{extra}")
+                    else:
+                        print(f"  ✗ Instagram{market_label}: could not extract follower count")
+                except Exception as e:
+                    msg = f"{name} instagram{market_label}: {e}"
+                    print(f"  ✗ Instagram{market_label}: {e}")
+                    error_summary.append(msg)
+
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+
+            # --- X (Twitter) ---
+            if x_handle and (thunderbit_key or scraperapi_key):
+                try:
+                    x = fetch_x_stats(x_handle, scraperapi_key, thunderbit_key)
+                    if x:
+                        _upsert_social(conn, cid, "x", snapshot_date,
+                                       x["followers"], posts_last_7d=x.get("posts_count"),
+                                       market_code=market_code)
+                        total_records += 1
+                        extra = f" | {x['posts_count']} posts" if x.get("posts_count") is not None else ""
+                        print(f"  ✓ X{market_label}: {x['followers']:,} followers{extra}")
+                    else:
+                        print(f"  ✗ X{market_label}: could not extract follower count")
+                except Exception as e:
+                    msg = f"{name} x{market_label}: {e}"
+                    print(f"  ✗ X{market_label}: {e}")
+                    error_summary.append(msg)
+
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     conn.close()
 

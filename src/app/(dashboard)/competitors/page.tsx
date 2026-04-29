@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { tierLabel } from "@/lib/utils";
 import { ArrowUpDown, ArrowUp, ArrowDown, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
+import { parseMarketParam, MARKET_NAMES } from "@/lib/markets";
 
 interface CompetitorRow {
   id: string;
@@ -151,12 +153,15 @@ export default function CompetitorsPage() {
   const [error, setError] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("tier");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const searchParams = useSearchParams();
+  const market = parseMarketParam(searchParams.get("market"));
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const r = await fetch("/api/competitors");
+      const url = market ? `/api/competitors?market=${market}` : "/api/competitors";
+      const r = await fetch(url);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       setData(d);
@@ -165,7 +170,7 @@ export default function CompetitorsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [market]);
 
   useEffect(() => {
     fetchData();
@@ -205,6 +210,13 @@ export default function CompetitorsPage() {
         <p className="text-gray-500 text-sm mt-1">
           All tracked brokers — click a row to view full details
         </p>
+        {market && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            Pricing & promos: {MARKET_NAMES[market]}
+            <span className="text-primary/60">— Trustpilot remains global</span>
+          </div>
+        )}
       </div>
 
       {error ? (
