@@ -25,11 +25,44 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRAPERS_DIR = os.path.join(PROJECT_ROOT, "scrapers")
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 
-# CRITICAL: install log redaction BEFORE any subprocess output is captured (D-12 / INFRA-03).
-# Make scrapers/ importable so log_redaction (a sibling module) resolves before we touch
-# anything that might log. install_redaction() is idempotent and safe to call here even
-# though run_all.py uses print(); the filter is already attached for any future logging
-# this orchestrator does, and child subprocesses install their own redaction.
+# CRITICAL: install log redaction at orchestrator startup (D-12 / INFRA-03).
+# Threat model anchor: April 2026 EC2 incident (see scrapers/log_redaction.py
+# module docstring) — leaked logs MUST NOT contain API tokens, healthcheck URLs,
+# or other secret-bearing values.
+#
+# Coverage map (current Phase 1 reality — code review WR-05 / Plan 01-10):
+#   - run_all.py itself: PROTECTED. install_redaction() below attaches the
+#     SecretRedactionFilter to the root logger so any logging.* call this
+#     orchestrator makes is filtered. Note: run_all.py's existing print()
+#     statements (header banner + status lines + log_path writes) bypass the
+#     filter by design — print() writes to sys.stdout directly and is not
+#     interceptable by a logging.Filter. Acceptable because run_all.py prints
+#     only its own static control-flow strings; it never echoes scraper
+#     output OR env-var values to stdout.
+#   - Child subprocesses that USE the filter (2 of 9):
+#       * scrapers/apify_social.py — calls install_redaction() before
+#         `from apify_client import ApifyClient` (the SDK debug-logs HTTP
+#         requests including Authorization headers; the filter strips them).
+#       * scrapers/calibration/validate_extraction.py — calls install_redaction()
+#         before importing promo_scraper (Anthropic SDK debug-logs requests).
+#   - Child subprocesses that DO NOT use the filter (7 of 9, residual risk):
+#       pricing_scraper.py, account_types_scraper.py, promo_scraper.py,
+#       social_scraper.py, reputation_scraper.py, wikifx_scraper.py,
+#       news_scraper.py, ai_analyzer.py. These use print() exclusively;
+#       print() bypasses logging filters by design, so wrapping them in
+#       install_redaction() would NOT protect them. The migration path is
+#       to move each scraper's print() calls to logging.info() incrementally
+#       as Phase 2-5 touches them — Phase 2 will already touch social_scraper.py
+#       for IG/X fanout, that is the right moment to migrate it.
+#   - Operator hygiene compensating control: SCRAPERAPI_KEY / THUNDERBIT_API_KEY /
+#     ANTHROPIC_API_KEY / YOUTUBE_API_KEY values are never echoed to stdout by the
+#     7 print()-using scrapers under their current code paths (audited at Plan 01-02
+#     time; no f-string or %-format includes a secret env var as a positional argument).
+#
+# Net trust posture: Phase 1 protects the new Apify code path (where the worst
+# secret leak risk lives — fresh SDK with verbose default logging) and accepts
+# documented residual risk on the legacy print()-using scrapers, with a named
+# migration path tied to phases that will already be touching those files.
 if SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, SCRAPERS_DIR)
 from log_redaction import install_redaction
