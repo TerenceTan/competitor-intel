@@ -37,9 +37,9 @@ This milestone replaces the broken Thunderbit social pipeline with Apify, fans s
 
 Plans:
 **Wave 1**
-- [ ] 01-01-PLAN.md — Schema deltas (apify_run_logs + share_of_search_snapshots tables; extraction_confidence columns) + Drizzle mirror + apify-client pin
+- [x] 01-01-PLAN.md — Schema deltas (apify_run_logs + share_of_search_snapshots tables; extraction_confidence columns) + Drizzle mirror + apify-client pin
 - [ ] 01-02-PLAN.md — Log redaction filter (scrapers/log_redaction.py) + unit tests; foundation for safe Apify scraper logging
-- [ ] 01-06-PLAN.md — EXTRACT-05 calibration set (JSONL) + per-language accuracy validator (parallelizable; deferrable per D-21)
+- [x] 01-06-PLAN.md — EXTRACT-05 calibration set (JSONL) + per-language accuracy validator (parallelizable; deferrable per D-21)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 01-03-PLAN.md — Apify FB scraper (scrapers/apify_social.py) with zero-result guard + apify_run_logs writes; SCRAPERS constant updated
@@ -104,7 +104,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Apify + Scaffolding + Trust Schema | 0/6 | Not started | - |
+| 1. Foundation — Apify + Scaffolding + Trust Schema | 2/6 | In progress (Wave 1) | - |
 | 2. Per-Market Social Fanout (8 APAC Markets) | 0/TBD | Not started | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |

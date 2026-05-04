@@ -34,7 +34,7 @@ Better promo extraction with confidence scoring, currency normalization, and lan
 - [ ] **EXTRACT-02**: Extraction handles non-English markets (TH, VN, TW, HK, ID) — single language per call, native-language context in system prompt, no preprocessing translation
 - [ ] **EXTRACT-03**: Extracted promos store original-locale currency code and amount alongside a normalized USD-equivalent for cross-market comparison
 - [ ] **EXTRACT-04**: Regulatory disclaimer text (MAS, SFC, FSC, etc.) is detected and excluded from the promo body before extraction to reduce signal dilution
-- [ ] **EXTRACT-05**: Extraction calibration: a 20–30 item hand-labeled set per non-English language is used during Phase 1 to validate ≥85% accuracy; markets failing the bar are flagged for prompt iteration before going live
+- [x] **EXTRACT-05**: Extraction calibration: a 20–30 item hand-labeled set per non-English language is used during Phase 1 to validate ≥85% accuracy; markets failing the bar are flagged for prompt iteration before going live *(Plan 01-06: validator + skeleton JSONL shipped; hand-labeled corpus deferred per D-21)*
 
 ### Share of Search (BigQuery sync)
 
@@ -75,7 +75,7 @@ Maintenance scaffolding that must land before any new scrapers go live. Retrofit
 - [ ] **INFRA-02**: `run_all.py` orchestration enforces a per-scraper timeout (30-min hard cap) and continues to other scrapers if one hangs — no single scraper can block the whole pipeline
 - [ ] **INFRA-03**: All scraper logs use a redaction filter that strips API keys, tokens, and credentials before writing — non-negotiable per the EC2 security incident history
 - [ ] **INFRA-04**: BigQuery service-account credentials are stored in `.env.local` only, never committed; key rotation procedure is documented in the team runbook
-- [ ] **INFRA-05**: All schema changes in this milestone are additive (new tables / new columns with defaults / no FK changes to existing tables) to keep the future SQLite → Postgres migration cost low
+- [x] **INFRA-05**: All schema changes in this milestone are additive (new tables / new columns with defaults / no FK changes to existing tables) to keep the future SQLite → Postgres migration cost low *(Plan 01-01: 4 additive deltas — 2 ALTER ADD COLUMN, 2 CREATE TABLE — landed; new FK from new table to existing table is allowed; no FK or column type change to existing tables)*
 
 ## v2 Requirements
 
@@ -136,7 +136,7 @@ Populated by gsd-roadmapper on 2026-05-04 after ROADMAP.md creation.
 | EXTRACT-02 | Phase 3 | Pending |
 | EXTRACT-03 | Phase 3 | Pending |
 | EXTRACT-04 | Phase 3 | Pending |
-| EXTRACT-05 | Phase 1 | Pending |
+| EXTRACT-05 | Phase 1 | Complete (Plan 01-06) |
 | SOS-01 | Phase 3 | Pending |
 | SOS-02 | Phase 3 | Pending |
 | SOS-03 | Phase 3 | Pending |
@@ -157,7 +157,7 @@ Populated by gsd-roadmapper on 2026-05-04 after ROADMAP.md creation.
 | INFRA-02 | Phase 1 | Pending |
 | INFRA-03 | Phase 1 | Pending |
 | INFRA-04 | Phase 1 | Pending |
-| INFRA-05 | Phase 1 | Pending |
+| INFRA-05 | Phase 1 | Complete (Plan 01-01) |
 
 **Coverage:**
 - v1 requirements: 36 total (note: planning context referenced "32 total"; the actual REQUIREMENTS.md file contains 36 — 6 SOCIAL + 4 MARKET + 5 EXTRACT + 5 SOS + 6 AI + 5 TRUST + 5 INFRA — all are mapped)
