@@ -68,6 +68,14 @@ if SCRAPERS_DIR not in sys.path:
 from log_redaction import install_redaction
 install_redaction()
 
+# Load .env.local from project root so HEALTHCHECK_URL_* env vars are visible to
+# this orchestrator when invoked by cron (cron does not auto-source .env.local).
+# Matches the load_dotenv pattern in scrapers/apify_social.py and
+# scrapers/social_scraper.py. Without this, _ping_healthcheck silently skips
+# (success exit code preserved per Plan 01-04, but HC.io stays "missing pings").
+from dotenv import load_dotenv
+load_dotenv(os.path.join(PROJECT_ROOT, ".env.local"))
+
 SCRIPTS = [
     "pricing_scraper.py",
     "account_types_scraper.py",
