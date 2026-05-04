@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 complete — all 6 plans shipped (01-01..01-06); TRUST-04 + TRUST-05 closed; FB cutover from Thunderbit to apify_social.py final; ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups (Apify token + cap, EC2 Python check + pip install + smoke run, 9 Healthchecks.io URLs) are completed
-last_updated: "2026-05-04T06:48:13Z"
-last_activity: 2026-05-04 -- Plan 01-05 executed (EmptyState reason-prop extension + /admin/data-health page + FB Thunderbit removal from social_scraper.py; TRUST-04 + TRUST-05 closed; Phase 1 complete)
+stopped_at: Phase 1 wave-4 gap closure complete — 10/10 plans shipped (01-01..01-10); SC2 + SC3 closed (scraper-failed EmptyState wired into Digital Presence; Data Health zero-result lookup correct); WR-01..05 closed (ACTOR_TO_SCRAPER equality, apify_social conn-leak/confidence fixes, calibration validator broker_name fix, run_all.py honest redaction-coverage comment); ROADMAP SC5 reconciliation note added per D-21; ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups (Apify token + cap, EC2 Python check + pip install + smoke run, 9 Healthchecks.io URLs) are completed
+last_updated: "2026-05-04T08:10:00Z"
+last_activity: 2026-05-04 -- Wave 4 gap closure executed (01-07/08/09/10 in parallel worktrees; SC2/SC3 + WR-01..05 closed; ROADMAP SC5 reconciliation per D-21)
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 
 ## Current Position
 
-Phase: 01 (foundation-apify-scaffolding-trust-schema) — COMPLETE (all 6 plans shipped)
-Plan: 6 of 6 complete (01-05 final wave-3 plan landed: EmptyState scraper-failed variant + /admin/data-health page + Thunderbit FB removal)
-Status: Phase 1 complete — ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups are completed
-Last activity: 2026-05-04 -- Plan 01-05 executed (EmptyState reason-prop extension + /admin/data-health page + FB Thunderbit removal from social_scraper.py; TRUST-04 + TRUST-05 closed; Phase 1 complete)
+Phase: 01 (foundation-apify-scaffolding-trust-schema) — COMPLETE (all 10 plans shipped, including Wave 4 gap closure)
+Plan: 10 of 10 complete (Wave 4 gap closure: 01-07 SC2 + 01-08 SC3/WR-01/03/04 + 01-09 WR-02 + 01-10 WR-05)
+Status: Phase 1 + gap closure complete — ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups are completed
+Last activity: 2026-05-04 -- Wave 4 gap closure executed (01-07/08/09/10 in parallel worktrees; SC2/SC3 + WR-01..05 closed; ROADMAP SC5 reconciliation per D-21)
 
 Progress: [██████████] 100%
 
@@ -36,15 +36,15 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 6 (01-01, 01-02, 01-06, 01-03, 01-04, 01-05)
-- Average duration: ~7.7 min
-- Total execution time: ~46 min
+- Total plans completed: 10 (01-01, 01-02, 01-06, 01-03, 01-04, 01-05, 01-07, 01-08, 01-09, 01-10)
+- Average duration: ~6.4 min
+- Total execution time: ~64 min (Wave 1-3: ~46m; Wave 4 gap closure: ~18m wall-clock for 4 parallel plans, longest plan 01-09 ~12m)
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01    | 6     | ~46m  | ~7.7m    |
+| 01    | 10    | ~64m  | ~6.4m    |
 
 **Recent Trend:**
 
@@ -90,6 +90,13 @@ Recent decisions affecting current work:
 - Plan 01-05: Cost color thresholds 70%/40% chosen so red triggers BEFORE the cap is hit (operational headroom for the operator); same shape Phase 5 will reuse for freshness pill thresholds
 - Plan 01-05: Surgical deletion of fetch_facebook_stats / _fetch_facebook_legacy / _FB_SCHEMA over deprecation-stub — verified via grep that no other module imports them, deletion is lower-risk than living deprecation stubs that future readers might re-discover and re-wire
 - Plan 01-05: FB call site replaced with `_ = fb_slug` no-op rather than removing the fb_slug extraction from the destructure block above — touching the destructure for cleanliness would expand the diff into the IG/X paths and risk an unrelated regression for a Phase-2-owned scraper
+- Plan 01-07 (gap SC2): Added narrow Drizzle change_events query (fieldName='scraper_zero_results' + 7d window + per-competitor) to the existing Promise.all block in src/app/(dashboard)/competitors/[id]/page.tsx — keeps the parallel-fetch pattern consistent and avoids opening a new render-time DB roundtrip; per-platform card now branches snapshot → scraper-failed EmptyState → plain N/A (snapshot wins to honor failure-vs-quiet distinction)
+- Plan 01-08 (gap SC3 / WR-01): ACTOR_TO_SCRAPER map placed in src/lib/constants.ts next to the SCRAPERS constant (single source of truth; comment cross-references scrapers/apify_social.py ACTOR_ID); equality lookup `ACTOR_TO_SCRAPER[z.actorId] === s.dbName` replaces the broken `z.actorId.includes(s.name)` substring match
+- Plan 01-08 (WR-03/WR-04): contextlib.closing() wraps both apify_social.py get_db() sites (canonical Apify boilerplate Phase 2 actors will copy 8×); confidence rule changed to `posts_last_7d > 0` to match docstring contract — closes the degenerate case where 50 items with unparseable timestamps would still report confidence='high'
+- Plan 01-09 (WR-02 / EXTRACT-05): validate_extraction.py reads broker_name from JSONL row with `'calibration_set'` fallback (was passing market code, which broke promo extraction's broker-aware prompts); JSONL _comment row schema description and 5 example rows gain explicit broker_name field
+- Plan 01-09 (D-21 reconciliation): Single parenthetical note appended to ROADMAP.md Phase 1 SC5 making explicit that the validator + JSONL skeleton ship in Phase 1 (per EXTRACT-05) but the 100–150-item hand-labeling step is operator-deferred per D-21 and gates Phase 3 prompt iteration
+- Plan 01-10 (WR-05): Comment-only fix — 5-line misleading run_all.py preamble replaced with 41-line honest coverage map naming 2-of-9 redaction coverage, the print() bypass, the migration path tied to Phases 2–5, and the April 2026 EC2 incident threat-model anchor; zero executable-line change verified by `git diff -w` (option (a) chosen over (b) retrofit-7-scrapers and (c) move-redaction-to-parent — both expand scope and break Phase 1 deferral discipline)
+- Phase 1 wave 4: Path-resolution recovery in 01-09 (Read/Edit-tool path resolution surprise) initially placed Task 1 edit on main checkout instead of worktree; agent recovered cleanly via file-scoped `git checkout --` before any commit; orchestrator post-merge cleanup verified main repo unaffected (HEAD on main, working tree clean)
 
 ### Pending Todos
 

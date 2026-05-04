@@ -49,10 +49,10 @@ Plans:
 - [x] 01-05-PLAN.md — EmptyState extension (scraper-failed variant) + /admin/data-health page + remove FB Thunderbit code from social_scraper.py
 
 **Wave 4 — Gap Closure** *(closes 4 gaps from 01-VERIFICATION.md + 5 code-review findings; all four plans run in parallel — zero file overlap)*
-- [ ] 01-07-PLAN.md — Wire `<EmptyState reason='scraper-failed'>` into competitors/[id] Digital Presence tab via change_events lookup (closes SC2)
-- [ ] 01-08-PLAN.md — Data Health zero-result lookup fix (ACTOR_TO_SCRAPER map) + apify_social.py defects (connection leak WR-03, degenerate confidence WR-04) (closes SC3, WR-01/03/04)
-- [ ] 01-09-PLAN.md — Calibration validator broker_name fix (WR-02) + JSONL schema update + ROADMAP SC5 reconciliation note per D-21
-- [ ] 01-10-PLAN.md — run_all.py honest redaction-coverage comment (WR-05; comment-only, zero executable change)
+- [x] 01-07-PLAN.md — Wire `<EmptyState reason='scraper-failed'>` into competitors/[id] Digital Presence tab via change_events lookup (closes SC2)
+- [x] 01-08-PLAN.md — Data Health zero-result lookup fix (ACTOR_TO_SCRAPER map) + apify_social.py defects (connection leak WR-03, degenerate confidence WR-04) (closes SC3, WR-01/03/04)
+- [x] 01-09-PLAN.md — Calibration validator broker_name fix (WR-02) + JSONL schema update + ROADMAP SC5 reconciliation note per D-21
+- [x] 01-10-PLAN.md — run_all.py honest redaction-coverage comment (WR-05; comment-only, zero executable change)
 
 ### Phase 2: Per-Market Social Fanout (8 APAC Markets)
 **Goal**: Marketing managers operating in any of the 8 APAC v1 markets (SG, HK, TW, MY, TH, PH, ID, VN) can open `/markets/<code>` and see Facebook, Instagram, and X data that is genuinely market-specific — not global content guessed at by content inference — for the competitors that have a per-market presence, with clean fallback for those that don't.
