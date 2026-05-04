@@ -520,46 +520,45 @@ def _infer_promo_type(text: str) -> str:
 # Layer 1 — Official broker promo pages (Playwright + Claude)
 # ---------------------------------------------------------------------------
 
-async def extract_promos_with_claude(page, competitor: dict, client) -> list[dict]:
-    """Navigate to competitor promo page, extract with Claude for structured data."""
-    promo_url = competitor.get("promo_url")
-    name = competitor["name"]
+def extract_promos_from_text(
+    page_text: str,
+    broker_name: str,
+    promo_url: str,
+    client,
+) -> list[dict]:
+    """Extract structured promo records from a plain-text page snippet via Claude.
 
-    if not promo_url:
-        print(f"    [{name}] No promo_url — skipping official page")
-        return []
+    This is the single source of truth for the official-page promo prompt. Both
+    the live async scraper (extract_promos_with_claude) and the offline calibration
+    validator (scrapers/calibration/validate_extraction.py per Plan 01-06) call
+    into this function so the prompt is never duplicated (D-19, RESEARCH.md A4).
 
-    try:
-        await page.goto(promo_url, wait_until="networkidle", timeout=45000)
-        await asyncio.sleep(3)
+    Args:
+        page_text: Plain text content of a competitor's promo page (already
+            scraped + truncated to a sane token budget by the caller).
+        broker_name: Competitor display name (for prompt context).
+        promo_url: Source URL of the promo page (for prompt context and the
+            default source_url field on each returned promo).
+        client: Anthropic client returned by _get_anthropic_client(); pass None
+            to short-circuit and return [] (used by tests / offline runs without
+            an API key).
 
-        # Handle Vantage geo-gate popup
-        if "vantage" in name.lower():
-            try:
-                confirm_btn = page.locator("text=I CONFIRM MY INTENTION TO PROCEED")
-                if await confirm_btn.is_visible(timeout=3000):
-                    await confirm_btn.click()
-                    await asyncio.sleep(2)
-            except Exception:
-                pass
-
-        page_text = await page.inner_text("body")
-        page_text = page_text[:12000]  # Truncate for token limits
-    except PlaywrightTimeout:
-        print(f"    [{name}] Timeout loading {promo_url}")
-        return []
-    except Exception as e:
-        print(f"    [{name}] Error loading {promo_url}: {e}")
-        return []
-
+    Returns:
+        list[dict] of normalised promo records with the fields shown in the
+        prompt schema (title, description, promo_type, bonus_value, min_deposit,
+        expiry) plus source="official", source_url, and broker_name_raw.
+        Returns [] on missing client, malformed Claude response, or empty page.
+    """
     if client is None:
+        return []
+    if not page_text:
         return []
 
     prompt = f"""Extract all active promotions from this forex broker's website page.
 Only include genuine financial promotions. Do NOT include generic product features,
 platform descriptions, or 'why trade with us' content.
 
-Broker: {name}
+Broker: {broker_name}
 Page URL: {promo_url}
 
 Page content:
@@ -590,13 +589,53 @@ Return [] if no real promotions are found."""
             extracted_url = item.pop("url", None)
             item["source"] = "official"
             item["source_url"] = extracted_url if extracted_url else promo_url
-            item["broker_name_raw"] = name
+            item["broker_name_raw"] = broker_name
             # Validate promo_type
             if item.get("promo_type") not in PROMO_TYPES:
                 item["promo_type"] = _infer_promo_type(item.get("title", "") + " " + item.get("description", ""))
             promos.append(item)
 
     return promos
+
+
+async def extract_promos_with_claude(page, competitor: dict, client) -> list[dict]:
+    """Navigate to competitor promo page, extract with Claude for structured data.
+
+    Thin async wrapper around extract_promos_from_text(): handles Playwright
+    navigation, Vantage geo-gate, and page-text capture, then delegates the
+    prompt construction + Claude call to the pure function.
+    """
+    promo_url = competitor.get("promo_url")
+    name = competitor["name"]
+
+    if not promo_url:
+        print(f"    [{name}] No promo_url — skipping official page")
+        return []
+
+    try:
+        await page.goto(promo_url, wait_until="networkidle", timeout=45000)
+        await asyncio.sleep(3)
+
+        # Handle Vantage geo-gate popup
+        if "vantage" in name.lower():
+            try:
+                confirm_btn = page.locator("text=I CONFIRM MY INTENTION TO PROCEED")
+                if await confirm_btn.is_visible(timeout=3000):
+                    await confirm_btn.click()
+                    await asyncio.sleep(2)
+            except Exception:
+                pass
+
+        page_text = await page.inner_text("body")
+        page_text = page_text[:12000]  # Truncate for token limits
+    except PlaywrightTimeout:
+        print(f"    [{name}] Timeout loading {promo_url}")
+        return []
+    except Exception as e:
+        print(f"    [{name}] Error loading {promo_url}: {e}")
+        return []
+
+    return extract_promos_from_text(page_text, name, promo_url, client)
 
 
 # ---------------------------------------------------------------------------
