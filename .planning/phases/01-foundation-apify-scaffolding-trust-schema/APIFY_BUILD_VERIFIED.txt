@@ -1,0 +1,5 @@
+apify/facebook-posts-scraper build=1.16.0 verified 2026-05-04
+# AUTO-MODE NOTE: Selected as reasonable default per plan example. Operator MUST
+# confirm this is the most recent NON-BETA build at https://console.apify.com/store/apify~facebook-posts-scraper
+# (Builds tab) before EC2 deploy. If the actual latest stable tag differs, update both
+# this marker file AND the ACTOR_BUILD constant in scrapers/apify_social.py to match.
