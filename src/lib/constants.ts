@@ -14,6 +14,7 @@ export const SCRAPERS = [
   { name: "account-types-scraper", dbName: "account_types_scraper", label: "Account Types Scraper", domain: "account_types", cadenceHours: 48 },
   { name: "promo-scraper", dbName: "promo_scraper", label: "Promo Scraper", domain: "promotions", cadenceHours: 48 },
   { name: "social-scraper", dbName: "social_scraper", label: "Social Scraper", domain: "social", cadenceHours: 168 },
+  { name: "apify-social", dbName: "apify_social", label: "Apify Social Scraper", domain: "social", cadenceHours: 168 },
   { name: "reputation-scraper", dbName: "reputation_scraper", label: "Reputation Scraper", domain: "reputation", cadenceHours: 72 },
   { name: "wikifx-scraper", dbName: "wikifx_scraper", label: "WikiFX Scraper", domain: "wikifx", cadenceHours: 168 },
   { name: "news-scraper", dbName: "news_scraper", label: "News Scraper", domain: "news", cadenceHours: 6 },
