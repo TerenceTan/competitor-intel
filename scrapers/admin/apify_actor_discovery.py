@@ -63,10 +63,21 @@ def show(term: str, items: list[dict]) -> None:
 
 
 def main() -> int:
+    # If a search term is passed as argv[1], use it as the only query.
+    # Otherwise run the default IG + X sweep.
+    if len(sys.argv) > 1:
+        term = " ".join(sys.argv[1:])
+        try:
+            show(term, search(term, limit=10))
+        except Exception as e:
+            print(f"  !! search failed: {type(e).__name__}: {e}")
+            return 1
+        return 0
+
     queries = [
-        ("instagram profile follower", "Instagram (profile-only)"),
-        ("twitter user profile follower", "X / Twitter (user/profile)"),
-        ("instagram scraper", "Instagram (broad — fallback if profile-only is poor)"),
+        ("instagram scraper", "Instagram (broad)"),
+        ("twitter scraper", "X / Twitter (broad — for follower count)"),
+        ("x twitter user profile", "X / Twitter (profile-focused)"),
     ]
     for term, label in queries:
         print(f"\n>>> {label}")
