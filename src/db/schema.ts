@@ -44,6 +44,7 @@ export const promoSnapshots = sqliteTable("promo_snapshots", {
   snapshotDate: text("snapshot_date").notNull(),
   promotionsJson: text("promotions_json"),
   marketCode: text("market_code").notNull().default("global"),
+  extractionConfidence: text("extraction_confidence"),  // 'high' | 'medium' | 'low' | null — Phase 1 TRUST-01
 });
 
 export const socialSnapshots = sqliteTable("social_snapshots", {
@@ -56,6 +57,7 @@ export const socialSnapshots = sqliteTable("social_snapshots", {
   engagementRate: real("engagement_rate"),
   latestPostUrl: text("latest_post_url"),
   marketCode: text("market_code").notNull().default("global"),
+  extractionConfidence: text("extraction_confidence"),  // 'high' | 'medium' | 'low' | null — Phase 1 TRUST-01
 });
 
 export const reputationSnapshots = sqliteTable("reputation_snapshots", {
@@ -80,6 +82,36 @@ export const appStoreSnapshots = sqliteTable("app_store_snapshots", {
   snapshotDate: text("snapshot_date").notNull(),
   iosRating: real("ios_rating"),
   iosRatingCount: integer("ios_rating_count"),
+});
+
+// Per-actor-run diagnostics for Apify-based scrapers (Phase 1, SOCIAL-05, D-08).
+// Mirrors scrapers/db_utils.py CREATE TABLE apify_run_logs.
+export const apifyRunLogs = sqliteTable("apify_run_logs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  scraperRunId: integer("scraper_run_id").references(() => scraperRuns.id),
+  apifyRunId: text("apify_run_id"),
+  actorId: text("actor_id").notNull(),
+  actorVersion: text("actor_version"),
+  competitorId: text("competitor_id").notNull().references(() => competitors.id),
+  platform: text("platform").notNull(),
+  marketCode: text("market_code").notNull().default("global"),
+  status: text("status").notNull(),  // 'success' | 'failed' | 'empty'
+  datasetCount: integer("dataset_count").default(0),
+  costUsd: real("cost_usd"),
+  errorMessage: text("error_message"),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+});
+
+// Phase 1 schema-only delta (per INFRA-05). Phase 3 owns the BigQuery sync code.
+export const shareOfSearchSnapshots = sqliteTable("share_of_search_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  marketCode: text("market_code").notNull(),
+  term: text("term").notNull(),
+  brand: text("brand").notNull(),
+  shareOfSearch: real("share_of_search").notNull(),
+  capturedAt: text("captured_at").notNull(),
+  snapshotDate: text("snapshot_date").notNull(),
 });
 
 export const wikifxSnapshots = sqliteTable("wikifx_snapshots", {
