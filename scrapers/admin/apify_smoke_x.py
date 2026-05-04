@@ -1,22 +1,27 @@
-"""One-shot smoke test: fetch X (Twitter) follower count for ic-markets via
-apidojo/tweet-scraper.
+"""One-shot smoke test: fetch X (Twitter) follower count for vantage via
+kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest.
 
-Strategy: pull 1 tweet from @IC_Markets, then read follower count from the
-embedded author object. Tweet-scrapers always include author metadata, so
-this works as a profile-info smoke even though the actor is technically
-tweet-focused.
+Strategy: pull 1 tweet from @vantagemkts, read follower count from the
+embedded author object. Cost: $0.00025 per tweet (= $0.25/1K).
 
-Why not scrape.badger/twitter-user-scraper: that actor failed input
-validation with an obscure 'Get User by ID' mode error and exposes no
-input schema publicly. apidojo/tweet-scraper has 140M runs and a stable
-documented input shape.
+Why this actor:
+  - LIMITED_PERMISSIONS (no scary "full account access" prompt like apidojo)
+  - 36M runs, 4.41 rating
+  - Cheapest pay-per-result X actor in the discovery list
+
+Why not the others tried:
+  - scrape.badger/twitter-user-scraper: 'Get User by ID' mode error, no
+    public input schema
+  - apidojo/tweet-scraper: requires full account access (security concern)
+
+Input shape isn't publicly documented for this actor (exampleRunInput is
+a placeholder), so we try several common shapes and use the first that
+the actor accepts.
 
 Usage:
     cd /home/ubuntu/app
     source .venv/bin/activate
     python scrapers/admin/apify_smoke_x.py
-
-Cost: ~$0.04 (1 dataset item × $0.04). Cost-capped at $0.50.
 """
 import json
 import os
@@ -30,9 +35,8 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env.local"))
 
 from apify_client import ApifyClient  # noqa: E402
 
-ACTOR_ID = "apidojo/tweet-scraper"
-# IC_Markets has no real X presence; using Vantage Markets (@vantagemkts) for
-# the smoke instead. Matches scrapers/config.py vantage entry.
+ACTOR_ID = "kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest"
+# IC_Markets has no real X presence; using Vantage Markets (@vantagemkts).
 HANDLE = "vantagemkts"
 PER_CALL_COST_CAP_USD = Decimal("0.50")
 
@@ -46,19 +50,41 @@ def main() -> int:
     print(f"=== Apify X smoke: {ACTOR_ID} → @{HANDLE} ===")
     client = ApifyClient(token)
 
-    run_input = {
-        "twitterHandles": [HANDLE],
-        "maxItems": 1,           # one tweet is enough — author metadata is embedded
-        "sort": "Latest",
-    }
-    print(f"run_input: {run_input}")
+    # Try multiple input shapes — first that the actor accepts wins.
+    # All include maxItems=1 to keep cost at $0.00025/attempt.
+    candidates = [
+        ({"twitterHandles": [HANDLE], "maxItems": 1}, "twitterHandles"),
+        ({"searchTerms": [f"from:{HANDLE}"], "maxItems": 1}, "searchTerms (from:)"),
+        ({"queries": [f"from:{HANDLE}"], "maxItems": 1}, "queries"),
+        ({"query": f"from:{HANDLE}", "maxItems": 1}, "query (singular)"),
+        ({"startUrls": [{"url": f"https://x.com/{HANDLE}"}], "maxItems": 1}, "startUrls"),
+        ({"urls": [f"https://x.com/{HANDLE}"], "maxItems": 1}, "urls"),
+    ]
+    run = None
+    for run_input, label in candidates:
+        print(f"\n--- attempt: {label} → {run_input} ---")
+        try:
+            run = client.actor(ACTOR_ID).call(
+                run_input=run_input,
+                max_total_charge_usd=PER_CALL_COST_CAP_USD,
+            )
+        except Exception as e:
+            print(f"  !! {type(e).__name__}: {str(e)[:200]}")
+            continue
+        if run is None:
+            print("  !! actor.call returned None")
+            continue
+        if run.get("status") == "FAILED":
+            # Some actors return a FAILED status object instead of raising
+            print(f"  !! actor FAILED: {run.get('statusMessage', '')[:200]}")
+            run = None
+            continue
+        # Got a non-failed run — use it
+        break
 
-    run = client.actor(ACTOR_ID).call(
-        run_input=run_input,
-        max_total_charge_usd=PER_CALL_COST_CAP_USD,
-    )
     if run is None:
-        print("ERROR: actor.call returned None", file=sys.stderr)
+        print("\nERROR: every input shape failed. Inspect actor docs:", file=sys.stderr)
+        print(f"  https://apify.com/{ACTOR_ID}", file=sys.stderr)
         return 2
 
     print(f"\nrun status: {run.get('status')}")
