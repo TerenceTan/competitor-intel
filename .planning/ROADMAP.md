@@ -32,7 +32,7 @@ This milestone replaces the broken Thunderbit social pipeline with Apify, fans s
   2. When an Apify actor returns zero results, the dashboard renders an `<EmptyState reason="scraper-failed">` (visually distinct from "no competitor activity") and a `change_events` row of type `scraper_zero_results` exists — silent success is impossible
   3. A Data Health page at `/admin/data-health` lists every scraper, its last successful run timestamp, zero-result counts (last 7 days), and Apify cost-to-date — giving the team a single triage surface from day one
   4. A scheduled scraper run that hangs longer than 30 minutes is killed by `run_all.py` and other scrapers continue; a healthcheck ping confirms each scheduled job's success within hours, not days
-  5. A 20–30-item hand-labeled calibration set per non-English language (TH, VN, TW, HK, ID) exists in the repo with measured extraction accuracy — markets failing the ≥85% bar are flagged before Phase 3 goes live
+  5. A 20–30-item hand-labeled calibration set per non-English language (TH, VN, TW, HK, ID) exists in the repo with measured extraction accuracy — markets failing the ≥85% bar are flagged before Phase 3 goes live *(Phase 1 ships the validator (`scrapers/calibration/validate_extraction.py`) and the JSONL skeleton with documented schema per EXTRACT-05; hand-labeling 100–150 real promo snippets is operator-deferred per D-21 and is the gating step for Phase 3 prompt iteration — see `scrapers/calibration/promo_extraction.jsonl` _comment row.)*
 **Plans**: 10 plans (6 initial + 4 gap-closure after 01-VERIFICATION.md)
 
 Plans:
