@@ -1,5 +1,13 @@
-apify/facebook-posts-scraper build=1.16.0 verified 2026-05-04
-# AUTO-MODE NOTE: Selected as reasonable default per plan example. Operator MUST
-# confirm this is the most recent NON-BETA build at https://console.apify.com/store/apify~facebook-posts-scraper
-# (Builds tab) before EC2 deploy. If the actual latest stable tag differs, update both
-# this marker file AND the ACTOR_BUILD constant in scrapers/apify_social.py to match.
+apify/facebook-posts-scraper build=0.0.293 verified 2026-05-04
+# Verified via Apify API on 2026-05-04 during EC2 smoke deployment. The actor
+# exposes a single tagged build (`latest`) currently mapped to buildNumber 0.0.293
+# (buildId zOo9aD0QIOtR9JCq3, finishedAt 2026-04-29). Pinning to the explicit
+# build number per D-04 (never use the moving `latest` tag).
+#
+# When the operator next reviews this pin, repeat the discovery via:
+#   curl -s "https://api.apify.com/v2/acts/apify~facebook-posts-scraper?token=$APIFY_API_TOKEN" | jq '.data.taggedBuilds'
+# If buildNumber moves, update both this marker file AND the ACTOR_BUILD constant
+# in scrapers/apify_social.py to match in the same commit.
+#
+# Prior placeholder value (1.16.0) was a plan example, not a real build tag —
+# Apify rejected it with "Value must be either a build tag or number".

@@ -84,7 +84,7 @@ ACTOR_ID = "apify/facebook-posts-scraper"
 # (Plan 03 Task 0 marker file). NEVER use 'latest'. If the operator updates
 # the marker file with a newer stable build, this constant MUST be updated to
 # match in the same commit.
-ACTOR_BUILD = "1.16.0"
+ACTOR_BUILD = "0.0.293"
 
 # Per-call cost cap belt-and-braces with the account-level $100/mo cap (D-06).
 # 50 posts at $0.002 = $0.10 per call; cap at $1.00 to guard against runaway
