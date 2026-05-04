@@ -1,0 +1,10 @@
+TZ=UTC
+0 */6 * * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py news_scraper.py >> logs/news_scraper.log 2>&1
+0 7 */3 * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py reputation_scraper.py >> logs/reputation_scraper.log 2>&1
+0 8 * * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py ai_analyzer.py >> logs/ai_analyzer.log 2>&1
+0 8 */2 * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py promo_scraper.py >> logs/promo_scraper.log 2>&1
+0 6 * * 1 cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py pricing_scraper.py >> logs/pricing_scraper.log 2>&1
+0 6 * * 1 cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py account_types_scraper.py >> logs/account_types_scraper.log 2>&1
+0 6 * * 1 cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py wikifx_scraper.py >> logs/wikifx_scraper.log 2>&1
+0 7 * * 1 cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py social_scraper.py >> logs/social_scraper.log 2>&1
+0 7 * * 1 cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py apify_social.py >> logs/apify_social.log 2>&1
