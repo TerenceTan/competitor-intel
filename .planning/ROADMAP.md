@@ -33,7 +33,7 @@ This milestone replaces the broken Thunderbit social pipeline with Apify, fans s
   3. A Data Health page at `/admin/data-health` lists every scraper, its last successful run timestamp, zero-result counts (last 7 days), and Apify cost-to-date — giving the team a single triage surface from day one
   4. A scheduled scraper run that hangs longer than 30 minutes is killed by `run_all.py` and other scrapers continue; a healthcheck ping confirms each scheduled job's success within hours, not days
   5. A 20–30-item hand-labeled calibration set per non-English language (TH, VN, TW, HK, ID) exists in the repo with measured extraction accuracy — markets failing the ≥85% bar are flagged before Phase 3 goes live
-**Plans**: 6 plans
+**Plans**: 10 plans (6 initial + 4 gap-closure after 01-VERIFICATION.md)
 
 Plans:
 **Wave 1**
@@ -47,6 +47,12 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 01-04-PLAN.md — run_all.py hardening: per-scraper timeout (1800s) + Healthchecks.io ping helper; apify_social.py registered in SCRIPTS
 - [x] 01-05-PLAN.md — EmptyState extension (scraper-failed variant) + /admin/data-health page + remove FB Thunderbit code from social_scraper.py
+
+**Wave 4 — Gap Closure** *(closes 4 gaps from 01-VERIFICATION.md + 5 code-review findings; all four plans run in parallel — zero file overlap)*
+- [ ] 01-07-PLAN.md — Wire `<EmptyState reason='scraper-failed'>` into competitors/[id] Digital Presence tab via change_events lookup (closes SC2)
+- [ ] 01-08-PLAN.md — Data Health zero-result lookup fix (ACTOR_TO_SCRAPER map) + apify_social.py defects (connection leak WR-03, degenerate confidence WR-04) (closes SC3, WR-01/03/04)
+- [ ] 01-09-PLAN.md — Calibration validator broker_name fix (WR-02) + JSONL schema update + ROADMAP SC5 reconciliation note per D-21
+- [ ] 01-10-PLAN.md — run_all.py honest redaction-coverage comment (WR-05; comment-only, zero executable change)
 
 ### Phase 2: Per-Market Social Fanout (8 APAC Markets)
 **Goal**: Marketing managers operating in any of the 8 APAC v1 markets (SG, HK, TW, MY, TH, PH, ID, VN) can open `/markets/<code>` and see Facebook, Instagram, and X data that is genuinely market-specific — not global content guessed at by content inference — for the competitors that have a per-market presence, with clean fallback for those that don't.
