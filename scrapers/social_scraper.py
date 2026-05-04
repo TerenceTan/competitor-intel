@@ -3,12 +3,17 @@ social_scraper.py
 -----------------
 Social media scraper for competitor follower counts:
   - YouTube: YouTube Data API v3 (channel search + subscriber count + recent videos)
-  - Facebook, Instagram, X: Thunderbit AI extraction (primary), ScraperAPI regex (fallback)
+  - Instagram, X: Thunderbit AI extraction (primary), ScraperAPI regex (fallback)
+
+Phase 1 (D-01): Facebook moved to scrapers/apify_social.py — runs as a
+separate subprocess via scrapers/run_all.py SCRIPTS list. The Thunderbit
+FB code path was removed from this file. Instagram and X stay here until
+Phase 2 owns the IG/X cutover.
 
 Requires environment variables:
   YOUTUBE_API_KEY      – for YouTube Data API
-  THUNDERBIT_API_KEY   – for AI-powered social extraction (Facebook, Instagram, X)
-  SCRAPERAPI_KEY       – fallback for Facebook, Instagram, X scraping
+  THUNDERBIT_API_KEY   – for AI-powered social extraction (Instagram, X)
+  SCRAPERAPI_KEY       – fallback for Instagram, X scraping
 
 Run from the project root:
     python scrapers/social_scraper.py
@@ -48,12 +53,7 @@ THUNDERBIT_API_URL = "https://openapi.thunderbit.com/openapi/v1/extract"
 
 # --- Thunderbit schemas for each platform ---
 # Thunderbit uses simple {field_name: description} format, not JSON Schema.
-_FB_SCHEMA = {
-    "followers": "Total number of followers or people who follow this page, as a number",
-    "likes": "Total number of page likes, as a number",
-    "posts_last_7d": "Number of posts published in the last 7 days, as a number",
-}
-
+# Phase 1: Facebook moved to scrapers/apify_social.py — _FB_SCHEMA removed.
 _IG_SCHEMA = {
     "followers": "Total number of followers, as a number",
     "posts_count": "Total number of posts, as a number",
@@ -263,53 +263,12 @@ def fetch_youtube_stats(competitor_name: str, query: str, api_key: str) -> dict 
 
 
 # ---------------------------------------------------------------------------
-# Facebook — legacy (ScraperAPI + regex fallback)
+# Facebook
 # ---------------------------------------------------------------------------
-
-def _fetch_facebook_legacy(page_slug: str, api_key: str) -> dict | None:
-    """Scrape Facebook page follower count via ScraperAPI regex. Legacy fallback."""
-    url = f"https://www.facebook.com/{page_slug}"
-    html = _fetch_via_scraperapi(url, api_key, render=True, premium=True)
-    if not html:
-        return None
-
-    followers = None
-    m = re.search(r'([\d,.\s]+[KMB]?)\s+(?:people\s+)?follow', html, re.IGNORECASE)
-    if m:
-        followers = _parse_abbreviated_number(m.group(1))
-    if not followers:
-        m = re.search(r'"follower_count"\s*:\s*(\d+)', html)
-        if m:
-            followers = int(m.group(1))
-    if not followers:
-        m = re.search(r'([\d,.\s]+[KMB]?)\s+(?:people\s+)?like', html, re.IGNORECASE)
-        if m:
-            followers = _parse_abbreviated_number(m.group(1))
-    if not followers:
-        return None
-    return {"followers": followers}
-
-
-def fetch_facebook_stats(page_slug: str, scraperapi_key: str | None, thunderbit_key: str | None) -> dict | None:
-    """Fetch Facebook stats. Tries Thunderbit AI extraction first, falls back to ScraperAPI regex."""
-    if thunderbit_key:
-        url = f"https://www.facebook.com/{page_slug}"
-        result = _thunderbit_extract(url, _FB_SCHEMA, thunderbit_key)
-        if result and result.get("followers"):
-            followers = int(result["followers"])
-            data = {"followers": followers}
-            if result.get("likes"):
-                data["likes"] = int(result["likes"])
-            if result.get("posts_last_7d") is not None:
-                data["posts_last_7d"] = int(result["posts_last_7d"])
-            print(f"    [Thunderbit] Facebook OK")
-            return data
-
-        print(f"    [Thunderbit] Facebook failed, trying ScraperAPI fallback...")
-
-    if scraperapi_key:
-        return _fetch_facebook_legacy(page_slug, scraperapi_key)
-    return None
+# Phase 1: Facebook moved to scrapers/apify_social.py (D-01).
+# That scraper runs as its own subprocess via scrapers/run_all.py SCRIPTS list.
+# DO NOT re-add Thunderbit FB calls here — apify_social.py is the single
+# authoritative writer for facebook_* social_snapshots rows.
 
 
 # ---------------------------------------------------------------------------
@@ -554,24 +513,10 @@ async def scrape_all():
                 await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
             # --- Facebook ---
-            if fb_slug and (thunderbit_key or scraperapi_key):
-                try:
-                    fb = fetch_facebook_stats(fb_slug, scraperapi_key, thunderbit_key)
-                    if fb:
-                        _upsert_social(conn, cid, "facebook", snapshot_date,
-                                       fb["followers"], posts_last_7d=fb.get("posts_last_7d"),
-                                       market_code=market_code)
-                        total_records += 1
-                        extra = f" | {fb['posts_last_7d']} posts/7d" if fb.get("posts_last_7d") is not None else ""
-                        print(f"  ✓ Facebook{market_label}: {fb['followers']:,} followers{extra}")
-                    else:
-                        print(f"  ✗ Facebook{market_label}: could not extract follower count")
-                except Exception as e:
-                    msg = f"{name} facebook{market_label}: {e}"
-                    print(f"  ✗ Facebook{market_label}: {e}")
-                    error_summary.append(msg)
-
-                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+            # Phase 1: Facebook moved to scrapers/apify_social.py (D-01).
+            # That scraper runs as its own subprocess via scrapers/run_all.py SCRIPTS list.
+            # This branch intentionally left empty — DO NOT re-add Thunderbit FB calls here.
+            _ = fb_slug  # keep the unpack above honest (variable still derived for IG/X siblings)
 
             # --- Instagram ---
             if ig_handle and (thunderbit_key or scraperapi_key):
