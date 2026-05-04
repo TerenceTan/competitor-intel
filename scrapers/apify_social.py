@@ -86,9 +86,13 @@ ACTOR_ID = "apify/facebook-posts-scraper"
 # match in the same commit.
 ACTOR_BUILD = "0.0.293"
 
-# Per-call cost cap belt-and-braces with the account-level $100/mo cap (D-06).
-# 50 posts at $0.002 = $0.10 per call; cap at $1.00 to guard against runaway
-# scrolls. Account-level cap is the primary defense — set in Apify Console.
+# Per-call cost cap belt-and-braces with the account-level monthly cap (D-06).
+# Phase 1 EC2 reality (2026-05-04): account is on Apify free tier — $5/mo
+# platform-enforced credit ceiling (not user-settable in Console). Typical run
+# cost was measured at $0.31 (50 posts × $0.005 + $0.006 actor-start). $1.00 cap
+# stays as the runaway-scroll guard; at weekly cadence with 1 competitor that's
+# at most 5 cap-hits/mo = $5 = exactly the free-tier ceiling. Phase 2 fanout
+# (8 markets × multiple competitors) will require upgrading to a paid tier.
 PER_CALL_COST_CAP_USD = Decimal("1.00")
 PER_RUN_TIMEOUT_SECS = 900  # 15 min (subprocess gives 30 min outer cap per INFRA-02)
 

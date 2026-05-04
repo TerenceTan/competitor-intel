@@ -18,9 +18,12 @@ import { formatDateTime } from "@/lib/utils";
 // /admin/* requires the auth_token cookie).
 export const dynamic = "force-dynamic";
 
-// D-06 — Apify monthly spend cap. Primary defense is the account-level cap set
-// in Apify Console; this constant is what the dashboard renders to the operator.
-const APIFY_MONTHLY_CAP_USD = 100;
+// D-06 — Apify monthly spend cap. Originally specified $100/mo assuming paid
+// tier. As of Phase 1 EC2 deploy (2026-05-04) the account is on the free tier
+// (~$5 monthly credit, platform-enforced — no user-settable Console limit).
+// Reflect that here so the cost-pct indicator tells the truth. Bump back to
+// 100 when the account upgrades for Phase 2 fanout.
+const APIFY_MONTHLY_CAP_USD = 5;
 
 export default async function DataHealthPage() {
   const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
