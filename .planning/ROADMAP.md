@@ -42,7 +42,7 @@ Plans:
 - [x] 01-06-PLAN.md — EXTRACT-05 calibration set (JSONL) + per-language accuracy validator (parallelizable; deferrable per D-21)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 01-03-PLAN.md — Apify FB scraper (scrapers/apify_social.py) with zero-result guard + apify_run_logs writes; SCRAPERS constant updated
+- [x] 01-03-PLAN.md — Apify FB scraper (scrapers/apify_social.py) with zero-result guard + apify_run_logs writes; SCRAPERS constant updated
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 01-04-PLAN.md — run_all.py hardening: per-scraper timeout (1800s) + Healthchecks.io ping helper; apify_social.py registered in SCRIPTS
@@ -104,7 +104,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Apify + Scaffolding + Trust Schema | 3/6 | In progress (Wave 1 complete) | - |
+| 1. Foundation — Apify + Scaffolding + Trust Schema | 4/6 | In progress (Wave 2 complete) | - |
 | 2. Per-Market Social Fanout (8 APAC Markets) | 0/TBD | Not started | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |

@@ -10,12 +10,12 @@
 
 Replaces broken Thunderbit integration. Apify managed actors with version pinning, zero-result detection, and per-actor cost tracking.
 
-- [ ] **SOCIAL-01**: System scrapes competitor Facebook posts via pinned Apify actor (`apify/facebook-posts-scraper`) and writes results to `social_snapshots`
+- [x] **SOCIAL-01**: System scrapes competitor Facebook posts via pinned Apify actor (`apify/facebook-posts-scraper`) and writes results to `social_snapshots`
 - [ ] **SOCIAL-02**: System scrapes competitor Instagram posts via pinned Apify actor (`apify/instagram-scraper`) and writes results to `social_snapshots`
 - [ ] **SOCIAL-03**: System scrapes competitor X (Twitter) posts via pinned Apify actor (`apidojo/tweet-scraper`) and writes results to `social_snapshots`
-- [ ] **SOCIAL-04**: When an Apify actor returns zero results, system writes a `change_events` row typed `scraper_zero_results` and does NOT insert a snapshot — preventing silent-success failures from looking like fresh data
-- [ ] **SOCIAL-05**: System logs each Apify run to `apify_run_logs` with actor ID, version, market_code, dataset count, cost, and run status — enabling Data Health diagnostics
-- [ ] **SOCIAL-06**: Apify integration uses pay-per-run actors (no `:latest` tags); a monthly spending cap is enforced in the Apify console before first scheduled run
+- [x] **SOCIAL-04**: When an Apify actor returns zero results, system writes a `change_events` row typed `scraper_zero_results` and does NOT insert a snapshot — preventing silent-success failures from looking like fresh data
+- [x] **SOCIAL-05**: System logs each Apify run to `apify_run_logs` with actor ID, version, market_code, dataset count, cost, and run status — enabling Data Health diagnostics
+- [x] **SOCIAL-06**: Apify integration uses pay-per-run actors (no `:latest` tags); a monthly spending cap is enforced in the Apify console before first scheduled run
 
 ### Per-Market Coverage (APAC fanout)
 
@@ -122,12 +122,12 @@ Populated by gsd-roadmapper on 2026-05-04 after ROADMAP.md creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SOCIAL-01 | Phase 1 | Pending |
+| SOCIAL-01 | Phase 1 | Complete (Plan 01-03) |
 | SOCIAL-02 | Phase 2 | Pending |
 | SOCIAL-03 | Phase 2 | Pending |
-| SOCIAL-04 | Phase 1 | Pending |
-| SOCIAL-05 | Phase 1 | Pending |
-| SOCIAL-06 | Phase 1 | Pending |
+| SOCIAL-04 | Phase 1 | Complete (Plan 01-03) |
+| SOCIAL-05 | Phase 1 | Complete (Plan 01-03) |
+| SOCIAL-06 | Phase 1 | Complete (Plan 01-03) |
 | MARKET-01 | Phase 2 | Pending |
 | MARKET-02 | Phase 2 | Pending |
 | MARKET-03 | Phase 2 | Pending |
