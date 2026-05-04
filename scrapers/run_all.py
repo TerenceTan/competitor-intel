@@ -28,6 +28,7 @@ SCRIPTS = [
     "account_types_scraper.py",
     "promo_scraper.py",
     "social_scraper.py",
+    "apify_social.py",          # Phase 1 — Apify FB cutover (Plan 03)
     "reputation_scraper.py",
     "wikifx_scraper.py",
     "news_scraper.py",
