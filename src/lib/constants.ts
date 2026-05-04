@@ -21,6 +21,21 @@ export const SCRAPERS = [
   { name: "ai-analysis", dbName: "ai_analyzer", label: "AI Analysis", domain: "insights", cadenceHours: 24 },
 ] as const;
 
+/**
+ * Maps Apify actor_id (the value stored in apify_run_logs.actor_id by
+ * scrapers/apify_social.py) to the dbName of the SCRAPERS entry that owns it.
+ *
+ * Source of truth on the Python side: scrapers/apify_social.py:79 (ACTOR_ID).
+ * When Phase 2 adds Instagram (apify/instagram-scraper) and X (apidojo/tweet-scraper)
+ * actors, add entries here AND mirror them in the corresponding scraper module.
+ *
+ * Used by /admin/data-health to look up per-actor zero-result counts by equality
+ * (replaces a substring-match that silently returned 0 — see code review WR-01 / SC3).
+ */
+export const ACTOR_TO_SCRAPER: Record<string, string> = {
+  "apify/facebook-posts-scraper": "apify_social",
+};
+
 /** Multiplier applied to cadenceHours to get the stale threshold — 2.5 cycles of grace. */
 export const STALE_MULTIPLIER = 2.5;
 
