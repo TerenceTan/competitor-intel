@@ -3,15 +3,23 @@ import { spawn } from "child_process";
 import path from "path";
 import { createHash, timingSafeEqual } from "crypto";
 
+// Mirror of scrapers/run_all.py SCRIPTS list — keep in sync.
 const SCRAPER_FILES: Record<string, string> = {
   "pricing-scraper": "pricing_scraper.py",
+  "account-types-scraper": "account_types_scraper.py",
   "promo-scraper": "promo_scraper.py",
   "social-scraper": "social_scraper.py",
+  "apify-social": "apify_social.py",
   "reputation-scraper": "reputation_scraper.py",
+  "wikifx-scraper": "wikifx_scraper.py",
   "news-scraper": "news_scraper.py",
   "ai-analysis": "ai_analyzer.py",
   "all": "run_all.py",
 };
+
+// Use venv Python (apify_client / dotenv etc. live there per Ubuntu PEP-668).
+// Override via VENV_PYTHON env var if the venv isn't at .venv/.
+const VENV_PYTHON = process.env.VENV_PYTHON || path.join(process.cwd(), ".venv", "bin", "python");
 
 // In-memory concurrency guard — only one scraper process at a time
 let runningScraperName: string | null = null;
@@ -91,8 +99,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid scraper path" }, { status: 400 });
   }
 
+  // Route through run_all.py for INFRA-02 timeout + INFRA-04 HC.io ping
+  // coverage (matches the cron pattern). Direct script invocation would
+  // bypass both. "all" is the orchestrator itself — invoke directly.
+  const runAllPath = path.resolve(path.join(scrapersDir, "run_all.py"));
+  const args = filename === "run_all.py" ? [runAllPath] : [runAllPath, filename];
+
   runningScraperName = scraper;
-  const child = spawn("python3", [scriptPath], {
+  const child = spawn(VENV_PYTHON, args, {
     detached: true,
     stdio: "ignore",
     cwd: process.cwd(),

@@ -512,51 +512,12 @@ async def scrape_all():
 
                 await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
-            # --- Facebook ---
-            # Phase 1: Facebook moved to scrapers/apify_social.py (D-01).
-            # That scraper runs as its own subprocess via scrapers/run_all.py SCRIPTS list.
-            # This branch intentionally left empty — DO NOT re-add Thunderbit FB calls here.
-            _ = fb_slug  # keep the unpack above honest (variable still derived for IG/X siblings)
-
-            # --- Instagram ---
-            if ig_handle and (thunderbit_key or scraperapi_key):
-                try:
-                    ig = fetch_instagram_stats(ig_handle, scraperapi_key, thunderbit_key)
-                    if ig:
-                        _upsert_social(conn, cid, "instagram", snapshot_date,
-                                       ig["followers"], posts_last_7d=ig.get("posts_count"),
-                                       market_code=market_code)
-                        total_records += 1
-                        extra = f" | {ig['posts_count']} posts" if ig.get("posts_count") is not None else ""
-                        print(f"  ✓ Instagram{market_label}: {ig['followers']:,} followers{extra}")
-                    else:
-                        print(f"  ✗ Instagram{market_label}: could not extract follower count")
-                except Exception as e:
-                    msg = f"{name} instagram{market_label}: {e}"
-                    print(f"  ✗ Instagram{market_label}: {e}")
-                    error_summary.append(msg)
-
-                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
-
-            # --- X (Twitter) ---
-            if x_handle and (thunderbit_key or scraperapi_key):
-                try:
-                    x = fetch_x_stats(x_handle, scraperapi_key, thunderbit_key)
-                    if x:
-                        _upsert_social(conn, cid, "x", snapshot_date,
-                                       x["followers"], posts_last_7d=x.get("posts_count"),
-                                       market_code=market_code)
-                        total_records += 1
-                        extra = f" | {x['posts_count']} posts" if x.get("posts_count") is not None else ""
-                        print(f"  ✓ X{market_label}: {x['followers']:,} followers{extra}")
-                    else:
-                        print(f"  ✗ X{market_label}: could not extract follower count")
-                except Exception as e:
-                    msg = f"{name} x{market_label}: {e}"
-                    print(f"  ✗ X{market_label}: {e}")
-                    error_summary.append(msg)
-
-                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+            # --- Facebook / Instagram / X — moved to scrapers/apify_social.py ---
+            # Phase 1 cut FB over to Apify (D-01). Phase 2 (2026-05-05) cuts IG and X
+            # over to Apify too — Thunderbit account exhausted, ScraperAPI 403'd on
+            # both platforms. apify_social.py now handles all three batched across
+            # all 11 competitors. DO NOT re-add Thunderbit/ScraperAPI calls here.
+            _ = fb_slug, ig_handle, x_handle  # keep the unpack honest
 
     conn.close()
 

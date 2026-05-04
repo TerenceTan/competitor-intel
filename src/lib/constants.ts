@@ -34,6 +34,8 @@ export const SCRAPERS = [
  */
 export const ACTOR_TO_SCRAPER: Record<string, string> = {
   "apify/facebook-posts-scraper": "apify_social",
+  "apify/instagram-profile-scraper": "apify_social",
+  "kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest": "apify_social",
 };
 
 /** Multiplier applied to cadenceHours to get the stale threshold — 2.5 cycles of grace. */

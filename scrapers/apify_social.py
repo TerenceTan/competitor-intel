@@ -1,54 +1,44 @@
 """
 scrapers/apify_social.py
 ------------------------
-Apify Facebook scraper for Phase 1 — replaces the broken Thunderbit FB code path
-(D-01). Calls the pinned ``apify/facebook-posts-scraper`` actor for ONE
-competitor (``ic-markets``, D-05) on FB only, in the ``global`` market.
+Apify-driven social scraper for Facebook + Instagram + X across all
+competitors in scrapers/config.py.
 
-Outputs (mutually exclusive — exactly one of the first two branches runs):
-  1. ``social_snapshots`` row with ``extraction_confidence`` (D-18) on success
-  2. ``change_events`` row of ``field_name = "scraper_zero_results"`` and SKIP
-     the snapshot insert when len(items) == 0 (D-07 / SOCIAL-04 silent-success
-     guard)
+Phase 1 shipped this for ic-markets / FB only (D-05). Phase 2 cutover
+extends it to all 11 competitors and adds IG + X actors so the broken
+Thunderbit / ScraperAPI paths in social_scraper.py can be removed.
 
-ALWAYS:
-  3. ``apify_run_logs`` row inserted in the ``finally`` block (success/empty/
-     failure) for diagnostics — surfaced on the Plan 05 Data Health page
-     (SOCIAL-05 / D-08).
+Per platform:
+  - Facebook: apify/facebook-posts-scraper (5 posts/page, batched)
+  - Instagram: apify/instagram-profile-scraper (batched)
+  - X / Twitter: kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest
+                 (batched via searchTerms with from: operator; mock-data detection)
 
-Threat model (per CLAUDE.md Comments rules)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-- T-01-03-01 Information Disclosure: ``install_redaction()`` is called BEFORE
-  ``from apify_client import ApifyClient`` so any SDK debug logging is filtered
-  through ``SecretRedactionFilter`` before reaching stdout/log files. Per the
-  April 2026 EC2 incident (MEMORY.md project_ec2_compromise.md) leaked logs
-  must not expose API tokens.
-- T-01-03-02 DoS (financial): per-call ``max_total_charge_usd=1.00`` cap is
-  belt-and-braces with the account-level $100/mo cap configured in Apify
-  Console (D-06). Plus ``timeout_secs=900`` and ``resultsLimit=50``.
-- T-01-03-03 Tampering (schema drift): ``ACTOR_BUILD`` is pinned to a specific
-  version (D-04). Never ``:latest`` — caught by negative grep in the plan
-  acceptance criteria.
-- T-01-03-04 Tampering (silent-success / fake fresh data): zero-items branch
-  writes a ``change_events`` row of type ``scraper_zero_results`` and SKIPS
-  the snapshot insert so a stale snapshot doesn't masquerade as fresh data.
-- T-01-03-06 db_utils bypass: all writes go through ``get_db()`` (WAL +
-  foreign keys + parameterized SQL). No direct ``sqlite3.connect`` calls in
-  this module.
+Outputs per competitor × platform:
+  1. ``social_snapshots`` row on success (extraction_confidence per D-18)
+  2. ``change_events`` row of ``scraper_zero_results`` when no data returned
+  3. ``apify_run_logs`` row ALWAYS (success / empty / failure) for diagnostics
 
-Run from the project root::
+Cost (free-tier-safe at weekly cadence):
+  IG (1 actor call, 11 profiles):                   ~$0.029
+  X  (1 actor call, ~220 tweets w/ batched terms):  ~$0.055
+  FB (1 actor call, 11 pages × 5 posts):            ~$0.281
+  ----------------------------------------------------------
+  Total per run: ~$0.36   |   Weekly: ~$1.44/mo
 
-    APIFY_API_TOKEN=apify_api_xxx python3 scrapers/apify_social.py
+Run from project root::
+
+    APIFY_API_TOKEN=apify_api_xxx .venv/bin/python scrapers/apify_social.py
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 import sys
 from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal
-import json
-import logging
 
 from dotenv import load_dotenv
 
@@ -58,9 +48,9 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env.local"))
 if _SCRAPERS_DIR not in sys.path:
     sys.path.insert(0, _SCRAPERS_DIR)
 
-# CRITICAL: install log redaction BEFORE importing apify_client or any other
-# library that may log secret-bearing requests. Per D-12 / INFRA-03 / the
-# April 2026 EC2 incident.
+# Install secret redaction BEFORE importing apify_client (D-12 / INFRA-03 /
+# April 2026 EC2 incident). apify_client SDK debug-logs HTTP requests
+# including Authorization headers; SecretRedactionFilter strips them.
 from log_redaction import install_redaction  # noqa: E402
 install_redaction()
 
@@ -68,183 +58,136 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
 from apify_client import ApifyClient  # noqa: E402
-from config import COMPETITORS  # noqa: E402  — module-level list of dicts (see scrapers/config.py)
+from config import COMPETITORS  # noqa: E402
 from db_utils import get_db, log_scraper_run, update_scraper_run  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-SCRAPER_NAME = "apify_social"  # MUST match dbName in src/lib/constants.ts SCRAPERS entry
+SCRAPER_NAME = "apify_social"  # MUST match dbName in src/lib/constants.ts SCRAPERS
 
-ACTOR_ID = "apify/facebook-posts-scraper"
+# Actor IDs — keep in sync with src/lib/constants.ts ACTOR_TO_SCRAPER map.
+FB_ACTOR_ID = "apify/facebook-posts-scraper"
+FB_ACTOR_BUILD = "0.0.293"   # verified 2026-05-04 — see APIFY_BUILD_VERIFIED.txt
+IG_ACTOR_ID = "apify/instagram-profile-scraper"
+X_ACTOR_ID  = "kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest"
 
-# ACTOR_BUILD pinned per D-04. The verified tag is recorded in
-# `.planning/phases/01-foundation-apify-scaffolding-trust-schema/APIFY_BUILD_VERIFIED.txt`
-# (Plan 03 Task 0 marker file). NEVER use 'latest'. If the operator updates
-# the marker file with a newer stable build, this constant MUST be updated to
-# match in the same commit.
-ACTOR_BUILD = "0.0.293"
+# Per-actor cost caps. Belt-and-braces against runaway scrolls. Free tier is $5/mo.
+FB_COST_CAP_USD = Decimal("1.00")  # 11 pages × 5 posts measured ~$0.28; cap at 1.00
+IG_COST_CAP_USD = Decimal("0.50")  # 11 profiles measured ~$0.029; generous cap
+X_COST_CAP_USD  = Decimal("0.50")  # 11 batched searchTerms measured ~$0.055
+FB_RESULTS_LIMIT_PER_PAGE = 5      # was 50 in Phase 1 — reduced for Phase 2 cost
+PER_RUN_TIMEOUT_SECS = 900         # 15 min (subprocess gives 30 min outer cap)
 
-# Per-call cost cap belt-and-braces with the account-level monthly cap (D-06).
-# Phase 1 EC2 reality (2026-05-04): account is on Apify free tier — $5/mo
-# platform-enforced credit ceiling (not user-settable in Console). Typical run
-# cost was measured at $0.31 (50 posts × $0.005 + $0.006 actor-start). $1.00 cap
-# stays as the runaway-scroll guard; at weekly cadence with 1 competitor that's
-# at most 5 cap-hits/mo = $5 = exactly the free-tier ceiling. Phase 2 fanout
-# (8 markets × multiple competitors) will require upgrading to a paid tier.
-PER_CALL_COST_CAP_USD = Decimal("1.00")
-PER_RUN_TIMEOUT_SECS = 900  # 15 min (subprocess gives 30 min outer cap per INFRA-02)
-
-PHASE_1_COMPETITOR_ID = "ic-markets"  # D-05
-PHASE_1_PLATFORM = "facebook"
-PHASE_1_MARKET_CODE = "global"
+DEFAULT_MARKET_CODE = "global"
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Per-platform extractors
 # ---------------------------------------------------------------------------
-def _extract_followers(item: dict) -> int | None:
-    """
-    Apify FB actor returns followers on page metadata; field path varies by
-    build. Try several known shapes defensively. Returns None when none of the
-    candidates are present or positive.
-    """
-    if not item:
-        return None
-    candidates = [
-        item.get("followers"),
-        (item.get("page") or {}).get("followers"),
-        (item.get("page") or {}).get("followersCount"),
-        item.get("likesCount"),  # FB pages often expose likes as a follower proxy
-    ]
-    for c in candidates:
-        if isinstance(c, (int, float)) and c > 0:
-            return int(c)
-    return None
-
-
 def _is_within_7d(timestamp_str: str | None) -> bool:
-    """Return True iff the timestamp string parses to a UTC time within 7 days of now."""
     if not timestamp_str:
         return False
     try:
-        ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        ts = datetime.fromisoformat(str(timestamp_str).replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - ts).total_seconds() <= 7 * 86400
     except Exception:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Main entry
-# ---------------------------------------------------------------------------
-def run():
-    """Phase 1: scrape ic-markets FB via Apify, write to social_snapshots OR change_events."""
-    api_token = os.environ.get("APIFY_API_TOKEN")
-    if not api_token:
-        logger.error("APIFY_API_TOKEN not set — aborting")
-        sys.exit(1)
+def _normalize_slug(s: str | None) -> str:
+    return (s or "").lower().strip().lstrip("@").rstrip("/")
 
-    run_id = log_scraper_run(SCRAPER_NAME, "running")
-    total_records = 0
-    error_summary: list[str] = []
+
+# ---------------------------------------------------------------------------
+# Facebook (apify/facebook-posts-scraper)
+# ---------------------------------------------------------------------------
+def _fb_extract_followers(items_for_page: list[dict]) -> int | None:
+    """FB posts-scraper sometimes embeds page metadata on each post; try
+    several known shapes defensively. Returns None when none of the
+    candidates are present or positive (PHASE 2 NOTE: this actor is
+    post-focused; consider apify/facebook-pages-scraper for cleaner page
+    metadata in a future plan)."""
+    for it in items_for_page or []:
+        candidates = [
+            it.get("followers"),
+            (it.get("page") or {}).get("followers"),
+            (it.get("page") or {}).get("followersCount"),
+            it.get("pageFollowers"),
+            it.get("pageLikes"),  # FB pages often expose likes as proxy
+        ]
+        for c in candidates:
+            if isinstance(c, (int, float)) and c > 0:
+                return int(c)
+    return None
+
+
+def _fb_group_by_slug(items: list[dict], slugs: list[str]) -> dict[str, list[dict]]:
+    """Group posts by which page they came from. Match on the page slug
+    appearing in pageUrl / url / facebookUrl."""
+    out: dict[str, list[dict]] = {s.lower(): [] for s in slugs}
+    for post in items:
+        url = (post.get("pageUrl") or post.get("url") or post.get("facebookUrl") or "").lower()
+        for s in slugs:
+            sl = s.lower()
+            if f"/{sl}" in url or f"facebook.com/{sl}" in url:
+                out[sl].append(post)
+                break
+    return out
+
+
+def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
+                 targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
+    """Returns (records_written, error_messages)."""
+    if not targets:
+        return 0, []
+    slugs = [t[1] for t in targets]
+    by_competitor = {t[1].lower(): t[0] for t in targets}
+    errors: list[str] = []
+    written = 0
     apify_run_obj: dict = {}
     items: list[dict] = []
-    apify_status = "failed"
     err_msg: str | None = None
 
     try:
-        client = ApifyClient(api_token)
-        snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-        # D-05: derive the FB URL from scrapers/config.py — do NOT hardcode the slug.
-        # COMPETITORS is the existing source of truth for competitor handles.
-        competitor = next(c for c in COMPETITORS if c["id"] == PHASE_1_COMPETITOR_ID)
-        fb_url = f"https://www.facebook.com/{competitor['facebook_slug']}"
-
-        # D-03 (synchronous .call() — no webhooks/async polling) + D-04 (pinned
-        # build) + RESEARCH.md Pattern 1.
-        run_input = {
-            "startUrls": [{"url": fb_url}],
-            "resultsLimit": 50,
-        }
-        logger.info("Calling actor %s build=%s", ACTOR_ID, ACTOR_BUILD)
-        apify_run_obj = client.actor(ACTOR_ID).call(
-            run_input=run_input,
-            build=ACTOR_BUILD,                           # D-04 — never 'latest'
-            max_total_charge_usd=PER_CALL_COST_CAP_USD,  # D-06 belt-and-braces
+        logger.info("FB: calling %s for %d pages", FB_ACTOR_ID, len(slugs))
+        apify_run_obj = client.actor(FB_ACTOR_ID).call(
+            run_input={
+                "startUrls": [{"url": f"https://www.facebook.com/{s}"} for s in slugs],
+                "resultsLimit": FB_RESULTS_LIMIT_PER_PAGE,
+            },
+            build=FB_ACTOR_BUILD,
+            max_total_charge_usd=FB_COST_CAP_USD,
             timeout_secs=PER_RUN_TIMEOUT_SECS,
-        )
-        # apify_run_obj fields: id, defaultDatasetId, status, usageTotalUsd,
-        # startedAt, finishedAt.
+        ) or {}
+        items = list(client.dataset(apify_run_obj.get("defaultDatasetId")).iterate_items())
+        logger.info("FB: actor returned %d items, status=%s", len(items), apify_run_obj.get("status"))
+    except Exception as e:
+        err_msg = str(e)
+        errors.append(f"fb_actor_call: {e}")
+        logger.exception("FB actor call failed")
 
-        items = client.dataset(apify_run_obj["defaultDatasetId"]).list_items().items
-        logger.info(
-            "Actor returned %d items, status=%s",
-            len(items),
-            apify_run_obj.get("status"),
-        )
+    grouped = _fb_group_by_slug(items, slugs)
 
-        with closing(get_db()) as conn:
-            if len(items) == 0:
-                # D-07 / SOCIAL-04: zero-result silent-success guard.
-                # Write change_events row, SKIP social_snapshots insert.
+    for slug in slugs:
+        slug_l = slug.lower()
+        cid = by_competitor[slug_l]
+        page_items = grouped.get(slug_l, [])
+        platform_status = "success" if page_items else "empty"
+
+        if page_items:
+            follower_count = _fb_extract_followers(page_items)
+            posts_last_7d = sum(
+                1 for it in page_items
+                if _is_within_7d(it.get("time") or it.get("timestamp") or it.get("createdAt"))
+            )
+            confidence = "high" if (follower_count and posts_last_7d > 0) else "medium"
+            try:
                 conn.execute(
-                    """
-                    INSERT INTO change_events
-                      (competitor_id, domain, field_name, old_value, new_value,
-                       severity, detected_at, market_code)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        PHASE_1_COMPETITOR_ID,
-                        f"social_{PHASE_1_PLATFORM}",
-                        "scraper_zero_results",
-                        None,
-                        json.dumps(
-                            {
-                                "actor_id": ACTOR_ID,
-                                "actor_version": ACTOR_BUILD,
-                                "apify_run_id": apify_run_obj.get("id"),
-                                "platform": PHASE_1_PLATFORM,
-                            }
-                        ),
-                        "medium",
-                        datetime.now(timezone.utc).isoformat(),
-                        PHASE_1_MARKET_CODE,
-                    ),
-                )
-                conn.commit()
-                apify_status = "empty"
-                logger.warning(
-                    "Zero-result run: wrote change_events row (no snapshot insert)"
-                )
-            else:
-                # D-18: extraction_confidence — "high" when both followers and
-                # posts_last_7d are derivable from the dataset; "medium" otherwise.
-                follower_count = _extract_followers(items[0])
-                posts_last_7d = sum(
-                    1 for it in items if _is_within_7d(it.get("time") or it.get("timestamp"))
-                )
-                # WR-04 fix: sum() always returns int >=0, never None — the previous "is not None" check
-                # was always True, so the rule was effectively "high if follower_count else medium"
-                # (docstring above promised the harder condition). Real rule per the contract:
-                # "high" requires BOTH a follower count AND at least one parseable post in the last 7d.
-                # A run that returns 50 items but every timestamp fails to parse will now correctly
-                # report confidence="medium" instead of falsely reporting "high".
-                confidence = "high" if (follower_count and posts_last_7d > 0) else "medium"
-
-                # Insert social_snapshots row directly (column count requires
-                # explicit SQL; mirror _upsert_social shape from social_scraper.py).
-                conn.execute(
-                    "DELETE FROM social_snapshots "
-                    "WHERE competitor_id=? AND platform=? AND market_code=? AND snapshot_date=?",
-                    (
-                        PHASE_1_COMPETITOR_ID,
-                        PHASE_1_PLATFORM,
-                        PHASE_1_MARKET_CODE,
-                        snapshot_date,
-                    ),
+                    "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
+                    "AND market_code=? AND snapshot_date=?",
+                    (cid, "facebook", DEFAULT_MARKET_CODE, snapshot_date),
                 )
                 conn.execute(
                     """
@@ -253,68 +196,320 @@ def run():
                        posts_last_7d, latest_post_url, market_code, extraction_confidence)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        PHASE_1_COMPETITOR_ID,
-                        PHASE_1_PLATFORM,
-                        snapshot_date,
-                        follower_count,
-                        posts_last_7d,
-                        items[0].get("url") or items[0].get("postUrl"),
-                        PHASE_1_MARKET_CODE,
-                        confidence,
-                    ),
+                    (cid, "facebook", snapshot_date, follower_count, posts_last_7d,
+                     page_items[0].get("url") or page_items[0].get("postUrl"),
+                     DEFAULT_MARKET_CODE, confidence),
                 )
-                conn.commit()
-                total_records = 1
-                apify_status = "success"
-                logger.info(
-                    "Wrote social_snapshots row: followers=%s posts_last_7d=%s confidence=%s",
-                    follower_count,
-                    posts_last_7d,
-                    confidence,
-                )
-
-    except Exception as e:
-        err_msg = str(e)
-        apify_status = "failed"
-        error_summary.append(f"apify_social: {e}")
-        logger.exception("Apify scraper failed")
-
-    finally:
-        # SOCIAL-05 / D-08 / RESEARCH.md Pattern 3: ALWAYS write apify_run_logs row.
-        try:
-            with closing(get_db()) as conn:
+                written += 1
+            except Exception as e:
+                errors.append(f"fb_db_write[{cid}]: {e}")
+                logger.exception("FB DB write failed for %s", cid)
+        else:
+            # Zero-result silent-success guard
+            try:
                 conn.execute(
                     """
-                    INSERT INTO apify_run_logs
-                      (scraper_run_id, apify_run_id, actor_id, actor_version,
-                       competitor_id, platform, market_code, status,
-                       dataset_count, cost_usd, error_message,
-                       started_at, finished_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO change_events
+                      (competitor_id, domain, field_name, old_value, new_value,
+                       severity, detected_at, market_code)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        run_id,
-                        apify_run_obj.get("id"),
-                        ACTOR_ID,
-                        ACTOR_BUILD,
-                        PHASE_1_COMPETITOR_ID,
-                        PHASE_1_PLATFORM,
-                        PHASE_1_MARKET_CODE,
-                        apify_status,
-                        len(items) if items else 0,
-                        float(apify_run_obj.get("usageTotalUsd") or 0.0),
-                        err_msg,
-                        apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
-                        apify_run_obj.get("finishedAt"),
-                    ),
+                    (cid, "social_facebook", "scraper_zero_results", None,
+                     json.dumps({"actor_id": FB_ACTOR_ID, "platform": "facebook",
+                                 "apify_run_id": apify_run_obj.get("id")}),
+                     "medium", datetime.now(timezone.utc).isoformat(), DEFAULT_MARKET_CODE),
                 )
-                conn.commit()
-        except Exception as e:
-            logger.exception("Failed to insert apify_run_logs row: %s", e)
+            except Exception as e:
+                errors.append(f"fb_zero_event[{cid}]: {e}")
 
-        status = "success" if not error_summary else "partial"
-        update_scraper_run(run_id, status, total_records, "; ".join(error_summary) or None)
+        # apify_run_logs row per competitor (shared apify_run_id)
+        try:
+            conn.execute(
+                """
+                INSERT INTO apify_run_logs
+                  (scraper_run_id, apify_run_id, actor_id, actor_version,
+                   competitor_id, platform, market_code, status, dataset_count,
+                   cost_usd, error_message, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, apify_run_obj.get("id"), FB_ACTOR_ID, FB_ACTOR_BUILD,
+                 cid, "facebook", DEFAULT_MARKET_CODE,
+                 "failed" if err_msg else platform_status,
+                 len(page_items), None, err_msg,
+                 apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
+                 apify_run_obj.get("finishedAt")),
+            )
+        except Exception as e:
+            errors.append(f"fb_log_row[{cid}]: {e}")
+
+    conn.commit()
+    return written, errors
+
+
+# ---------------------------------------------------------------------------
+# Instagram (apify/instagram-profile-scraper)
+# ---------------------------------------------------------------------------
+def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
+                  targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
+    if not targets:
+        return 0, []
+    handles = [t[1] for t in targets]
+    by_handle = {_normalize_slug(t[1]): t[0] for t in targets}
+    errors: list[str] = []
+    written = 0
+    apify_run_obj: dict = {}
+    items: list[dict] = []
+    err_msg: str | None = None
+
+    try:
+        logger.info("IG: calling %s for %d handles", IG_ACTOR_ID, len(handles))
+        apify_run_obj = client.actor(IG_ACTOR_ID).call(
+            run_input={"usernames": handles},
+            max_total_charge_usd=IG_COST_CAP_USD,
+            timeout_secs=PER_RUN_TIMEOUT_SECS,
+        ) or {}
+        items = list(client.dataset(apify_run_obj.get("defaultDatasetId")).iterate_items())
+        logger.info("IG: returned %d items, status=%s", len(items), apify_run_obj.get("status"))
+    except Exception as e:
+        err_msg = str(e)
+        errors.append(f"ig_actor_call: {e}")
+        logger.exception("IG actor call failed")
+
+    # Index by username — the actor returns one item per username.
+    by_user = {_normalize_slug(it.get("username")): it for it in items if it.get("username")}
+
+    for handle in handles:
+        h = _normalize_slug(handle)
+        cid = by_handle[h]
+        item = by_user.get(h)
+        if item and isinstance(item.get("followersCount"), int):
+            try:
+                followers = item["followersCount"]
+                posts_count = item.get("postsCount") or 0
+                # IG profile actor doesn't return per-post timestamps; use postsCount as
+                # a proxy "has activity" signal. Real posts_last_7d would need a separate call.
+                confidence = "high" if followers > 0 else "medium"
+                conn.execute(
+                    "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
+                    "AND market_code=? AND snapshot_date=?",
+                    (cid, "instagram", DEFAULT_MARKET_CODE, snapshot_date),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO social_snapshots
+                      (competitor_id, platform, snapshot_date, followers,
+                       posts_last_7d, latest_post_url, market_code, extraction_confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (cid, "instagram", snapshot_date, followers, None,
+                     f"https://www.instagram.com/{handle}/", DEFAULT_MARKET_CODE, confidence),
+                )
+                written += 1
+                platform_status = "success"
+                dataset_count = 1
+            except Exception as e:
+                errors.append(f"ig_db_write[{cid}]: {e}")
+                platform_status = "failed"
+                dataset_count = 0
+        else:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO change_events
+                      (competitor_id, domain, field_name, old_value, new_value,
+                       severity, detected_at, market_code)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (cid, "social_instagram", "scraper_zero_results", None,
+                     json.dumps({"actor_id": IG_ACTOR_ID, "platform": "instagram",
+                                 "apify_run_id": apify_run_obj.get("id")}),
+                     "medium", datetime.now(timezone.utc).isoformat(), DEFAULT_MARKET_CODE),
+                )
+            except Exception as e:
+                errors.append(f"ig_zero_event[{cid}]: {e}")
+            platform_status = "empty"
+            dataset_count = 0
+
+        try:
+            conn.execute(
+                """
+                INSERT INTO apify_run_logs
+                  (scraper_run_id, apify_run_id, actor_id, actor_version,
+                   competitor_id, platform, market_code, status, dataset_count,
+                   cost_usd, error_message, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, apify_run_obj.get("id"), IG_ACTOR_ID, None, cid, "instagram",
+                 DEFAULT_MARKET_CODE, "failed" if err_msg else platform_status,
+                 dataset_count, None, err_msg,
+                 apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
+                 apify_run_obj.get("finishedAt")),
+            )
+        except Exception as e:
+            errors.append(f"ig_log_row[{cid}]: {e}")
+
+    conn.commit()
+    return written, errors
+
+
+# ---------------------------------------------------------------------------
+# X / Twitter (kaitoeasyapi cheapest tweet scraper)
+# ---------------------------------------------------------------------------
+def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
+          targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
+    if not targets:
+        return 0, []
+    handles = [t[1] for t in targets]
+    by_handle = {_normalize_slug(t[1]): t[0] for t in targets}
+    errors: list[str] = []
+    written = 0
+    apify_run_obj: dict = {}
+    items: list[dict] = []
+    err_msg: str | None = None
+
+    try:
+        logger.info("X: calling %s for %d handles", X_ACTOR_ID, len(handles))
+        apify_run_obj = client.actor(X_ACTOR_ID).call(
+            run_input={
+                "searchTerms": [f"from:{h}" for h in handles],
+                "maxItems": len(handles),
+            },
+            max_total_charge_usd=X_COST_CAP_USD,
+            timeout_secs=PER_RUN_TIMEOUT_SECS,
+        ) or {}
+        items = list(client.dataset(apify_run_obj.get("defaultDatasetId")).iterate_items())
+        logger.info("X: returned %d items, status=%s", len(items), apify_run_obj.get("status"))
+    except Exception as e:
+        err_msg = str(e)
+        errors.append(f"x_actor_call: {e}")
+        logger.exception("X actor call failed")
+
+    # Tweets carry the author object; index by author.userName. Skip mocks.
+    by_user: dict[str, dict] = {}
+    mock_count = 0
+    for tweet in items:
+        if tweet.get("type") == "mock_tweet":
+            mock_count += 1
+            continue
+        author = tweet.get("author") or {}
+        u = _normalize_slug(author.get("userName"))
+        if u and u not in by_user:
+            by_user[u] = author
+    if mock_count:
+        logger.warning("X: %d mock placeholders (handles that 404'd) — billed but ignored", mock_count)
+
+    for handle in handles:
+        h = _normalize_slug(handle)
+        cid = by_handle[h]
+        author = by_user.get(h)
+        if author and isinstance(author.get("followers"), int):
+            try:
+                followers = author["followers"]
+                statuses = author.get("statusesCount") or 0
+                confidence = "high" if followers > 0 else "medium"
+                conn.execute(
+                    "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
+                    "AND market_code=? AND snapshot_date=?",
+                    (cid, "x", DEFAULT_MARKET_CODE, snapshot_date),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO social_snapshots
+                      (competitor_id, platform, snapshot_date, followers,
+                       posts_last_7d, latest_post_url, market_code, extraction_confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (cid, "x", snapshot_date, followers, None,
+                     f"https://x.com/{handle}", DEFAULT_MARKET_CODE, confidence),
+                )
+                written += 1
+                platform_status = "success"
+                dataset_count = 1
+            except Exception as e:
+                errors.append(f"x_db_write[{cid}]: {e}")
+                platform_status = "failed"
+                dataset_count = 0
+        else:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO change_events
+                      (competitor_id, domain, field_name, old_value, new_value,
+                       severity, detected_at, market_code)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (cid, "social_x", "scraper_zero_results", None,
+                     json.dumps({"actor_id": X_ACTOR_ID, "platform": "x",
+                                 "apify_run_id": apify_run_obj.get("id"),
+                                 "mock_count": mock_count}),
+                     "medium", datetime.now(timezone.utc).isoformat(), DEFAULT_MARKET_CODE),
+                )
+            except Exception as e:
+                errors.append(f"x_zero_event[{cid}]: {e}")
+            platform_status = "empty"
+            dataset_count = 0
+
+        try:
+            conn.execute(
+                """
+                INSERT INTO apify_run_logs
+                  (scraper_run_id, apify_run_id, actor_id, actor_version,
+                   competitor_id, platform, market_code, status, dataset_count,
+                   cost_usd, error_message, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, apify_run_obj.get("id"), X_ACTOR_ID, None, cid, "x",
+                 DEFAULT_MARKET_CODE, "failed" if err_msg else platform_status,
+                 dataset_count, None, err_msg,
+                 apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
+                 apify_run_obj.get("finishedAt")),
+            )
+        except Exception as e:
+            errors.append(f"x_log_row[{cid}]: {e}")
+
+    conn.commit()
+    return written, errors
+
+
+# ---------------------------------------------------------------------------
+# Main entry — orchestrate all 3 platforms
+# ---------------------------------------------------------------------------
+def run():
+    api_token = os.environ.get("APIFY_API_TOKEN")
+    if not api_token:
+        logger.error("APIFY_API_TOKEN not set — aborting")
+        sys.exit(1)
+
+    run_id = log_scraper_run(SCRAPER_NAME, "running")
+    snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    client = ApifyClient(api_token)
+
+    fb_targets = [(c["id"], c["facebook_slug"])    for c in COMPETITORS if c.get("facebook_slug")]
+    ig_targets = [(c["id"], c["instagram_handle"]) for c in COMPETITORS if c.get("instagram_handle")]
+    x_targets  = [(c["id"], c["x_handle"])         for c in COMPETITORS if c.get("x_handle")]
+
+    logger.info("Targets — FB: %d, IG: %d, X: %d competitors",
+                len(fb_targets), len(ig_targets), len(x_targets))
+
+    total_written = 0
+    all_errors: list[str] = []
+
+    with closing(get_db()) as conn:
+        n, errs = run_facebook(client, conn, run_id, snapshot_date, fb_targets)
+        total_written += n
+        all_errors.extend(errs)
+
+        n, errs = run_instagram(client, conn, run_id, snapshot_date, ig_targets)
+        total_written += n
+        all_errors.extend(errs)
+
+        n, errs = run_x(client, conn, run_id, snapshot_date, x_targets)
+        total_written += n
+        all_errors.extend(errs)
+
+    status = "success" if not all_errors else "partial"
+    update_scraper_run(run_id, status, total_written, "; ".join(all_errors[:5]) or None)
+    logger.info("DONE. wrote=%d errors=%d status=%s", total_written, len(all_errors), status)
 
 
 if __name__ == "__main__":
