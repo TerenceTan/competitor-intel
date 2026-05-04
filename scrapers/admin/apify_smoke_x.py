@@ -31,7 +31,9 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env.local"))
 from apify_client import ApifyClient  # noqa: E402
 
 ACTOR_ID = "apidojo/tweet-scraper"
-HANDLE = "IC_Markets"
+# IC_Markets has no real X presence; using Vantage Markets (@vantagemkts) for
+# the smoke instead. Matches scrapers/config.py vantage entry.
+HANDLE = "vantagemkts"
 PER_CALL_COST_CAP_USD = Decimal("0.50")
 
 
