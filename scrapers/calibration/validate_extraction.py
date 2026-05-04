@@ -220,7 +220,11 @@ def main() -> int:
             try:
                 extracted = extract_promos_from_text(
                     page_text=item["input_text"],
-                    broker_name=item.get("market", "unknown"),
+                    # WR-02 fix: read broker_name from the row; fall back to a neutral sentinel.
+                    # NEVER pass the market code — it gets interpolated into the production
+                    # prompt as "Broker: TH" (or VN/TW/HK/ID) and biases extraction, silently
+                    # undermining accuracy numbers used to gate Phase 3 prompt iteration.
+                    broker_name=item.get("broker_name", "calibration_set"),
                     promo_url=item.get("source_url", ""),
                     client=client,
                 )
