@@ -1,0 +1,6 @@
+EC2 Python verified 2026-05-04: Python 3.12.3 (>= 3.10 floor per Plan 01-01).
+# /usr/bin/python3 reports 3.12.3 on the rebuilt EC2 (Apr 2026 post-incident).
+# Project venv at /home/ubuntu/app/.venv installs apify-client==2.5.0 and
+# python-dotenv==1.0.1 cleanly under PEP-668; no --break-system-packages needed.
+# Smoke run via .venv/bin/python scrapers/run_all.py apify_social.py succeeded
+# (50 items returned, social_snapshots row written, HC.io apify-social green).
