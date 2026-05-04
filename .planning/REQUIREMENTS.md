@@ -73,7 +73,7 @@ Maintenance scaffolding that must land before any new scrapers go live. Retrofit
 
 - [ ] **INFRA-01**: Each scheduled scraper job pings a healthcheck endpoint (Healthchecks.io or equivalent) on success — silent cron failures are detected within hours, not days
 - [ ] **INFRA-02**: `run_all.py` orchestration enforces a per-scraper timeout (30-min hard cap) and continues to other scrapers if one hangs — no single scraper can block the whole pipeline
-- [ ] **INFRA-03**: All scraper logs use a redaction filter that strips API keys, tokens, and credentials before writing — non-negotiable per the EC2 security incident history
+- [x] **INFRA-03**: All scraper logs use a redaction filter that strips API keys, tokens, and credentials before writing — non-negotiable per the EC2 security incident history *(Plan 01-02: scrapers/log_redaction.py ships SecretRedactionFilter + idempotent install_redaction(); 7 stdlib unittest cases pass; April 2026 EC2 incident referenced in module docstring)*
 - [ ] **INFRA-04**: BigQuery service-account credentials are stored in `.env.local` only, never committed; key rotation procedure is documented in the team runbook
 - [x] **INFRA-05**: All schema changes in this milestone are additive (new tables / new columns with defaults / no FK changes to existing tables) to keep the future SQLite → Postgres migration cost low *(Plan 01-01: 4 additive deltas — 2 ALTER ADD COLUMN, 2 CREATE TABLE — landed; new FK from new table to existing table is allowed; no FK or column type change to existing tables)*
 
@@ -155,7 +155,7 @@ Populated by gsd-roadmapper on 2026-05-04 after ROADMAP.md creation.
 | TRUST-05 | Phase 1 | Pending |
 | INFRA-01 | Phase 1 | Pending |
 | INFRA-02 | Phase 1 | Pending |
-| INFRA-03 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Complete (Plan 01-02) |
 | INFRA-04 | Phase 1 | Pending |
 | INFRA-05 | Phase 1 | Complete (Plan 01-01) |
 
