@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
@@ -180,88 +181,94 @@ def run():
             apify_run_obj.get("status"),
         )
 
-        conn = get_db()
-        if len(items) == 0:
-            # D-07 / SOCIAL-04: zero-result silent-success guard.
-            # Write change_events row, SKIP social_snapshots insert.
-            conn.execute(
-                """
-                INSERT INTO change_events
-                  (competitor_id, domain, field_name, old_value, new_value,
-                   severity, detected_at, market_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    PHASE_1_COMPETITOR_ID,
-                    f"social_{PHASE_1_PLATFORM}",
-                    "scraper_zero_results",
-                    None,
-                    json.dumps(
-                        {
-                            "actor_id": ACTOR_ID,
-                            "actor_version": ACTOR_BUILD,
-                            "apify_run_id": apify_run_obj.get("id"),
-                            "platform": PHASE_1_PLATFORM,
-                        }
+        with closing(get_db()) as conn:
+            if len(items) == 0:
+                # D-07 / SOCIAL-04: zero-result silent-success guard.
+                # Write change_events row, SKIP social_snapshots insert.
+                conn.execute(
+                    """
+                    INSERT INTO change_events
+                      (competitor_id, domain, field_name, old_value, new_value,
+                       severity, detected_at, market_code)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        PHASE_1_COMPETITOR_ID,
+                        f"social_{PHASE_1_PLATFORM}",
+                        "scraper_zero_results",
+                        None,
+                        json.dumps(
+                            {
+                                "actor_id": ACTOR_ID,
+                                "actor_version": ACTOR_BUILD,
+                                "apify_run_id": apify_run_obj.get("id"),
+                                "platform": PHASE_1_PLATFORM,
+                            }
+                        ),
+                        "medium",
+                        datetime.now(timezone.utc).isoformat(),
+                        PHASE_1_MARKET_CODE,
                     ),
-                    "medium",
-                    datetime.now(timezone.utc).isoformat(),
-                    PHASE_1_MARKET_CODE,
-                ),
-            )
-            conn.commit()
-            apify_status = "empty"
-            logger.warning(
-                "Zero-result run: wrote change_events row (no snapshot insert)"
-            )
-        else:
-            # D-18: extraction_confidence — "high" when both followers and
-            # posts_last_7d are derivable from the dataset; "medium" otherwise.
-            follower_count = _extract_followers(items[0])
-            posts_last_7d = sum(
-                1 for it in items if _is_within_7d(it.get("time") or it.get("timestamp"))
-            )
-            confidence = "high" if follower_count and posts_last_7d is not None else "medium"
+                )
+                conn.commit()
+                apify_status = "empty"
+                logger.warning(
+                    "Zero-result run: wrote change_events row (no snapshot insert)"
+                )
+            else:
+                # D-18: extraction_confidence — "high" when both followers and
+                # posts_last_7d are derivable from the dataset; "medium" otherwise.
+                follower_count = _extract_followers(items[0])
+                posts_last_7d = sum(
+                    1 for it in items if _is_within_7d(it.get("time") or it.get("timestamp"))
+                )
+                # WR-04 fix: sum() always returns int >=0, never None — the previous "is not None" check
+                # was always True, so the rule was effectively "high if follower_count else medium"
+                # (docstring above promised the harder condition). Real rule per the contract:
+                # "high" requires BOTH a follower count AND at least one parseable post in the last 7d.
+                # A run that returns 50 items but every timestamp fails to parse will now correctly
+                # report confidence="medium" instead of falsely reporting "high".
+                confidence = "high" if (follower_count and posts_last_7d > 0) else "medium"
 
-            # Insert social_snapshots row directly (column count requires
-            # explicit SQL; mirror _upsert_social shape from social_scraper.py).
-            conn.execute(
-                "DELETE FROM social_snapshots "
-                "WHERE competitor_id=? AND platform=? AND market_code=? AND snapshot_date=?",
-                (
-                    PHASE_1_COMPETITOR_ID,
-                    PHASE_1_PLATFORM,
-                    PHASE_1_MARKET_CODE,
-                    snapshot_date,
-                ),
-            )
-            conn.execute(
-                """
-                INSERT INTO social_snapshots
-                  (competitor_id, platform, snapshot_date, followers,
-                   posts_last_7d, latest_post_url, market_code, extraction_confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    PHASE_1_COMPETITOR_ID,
-                    PHASE_1_PLATFORM,
-                    snapshot_date,
+                # Insert social_snapshots row directly (column count requires
+                # explicit SQL; mirror _upsert_social shape from social_scraper.py).
+                conn.execute(
+                    "DELETE FROM social_snapshots "
+                    "WHERE competitor_id=? AND platform=? AND market_code=? AND snapshot_date=?",
+                    (
+                        PHASE_1_COMPETITOR_ID,
+                        PHASE_1_PLATFORM,
+                        PHASE_1_MARKET_CODE,
+                        snapshot_date,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO social_snapshots
+                      (competitor_id, platform, snapshot_date, followers,
+                       posts_last_7d, latest_post_url, market_code, extraction_confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        PHASE_1_COMPETITOR_ID,
+                        PHASE_1_PLATFORM,
+                        snapshot_date,
+                        follower_count,
+                        posts_last_7d,
+                        items[0].get("url") or items[0].get("postUrl"),
+                        PHASE_1_MARKET_CODE,
+                        confidence,
+                    ),
+                )
+                conn.commit()
+                total_records = 1
+                apify_status = "success"
+                logger.info(
+                    "Wrote social_snapshots row: followers=%s posts_last_7d=%s confidence=%s",
                     follower_count,
                     posts_last_7d,
-                    items[0].get("url") or items[0].get("postUrl"),
-                    PHASE_1_MARKET_CODE,
                     confidence,
-                ),
-            )
-            conn.commit()
-            total_records = 1
-            apify_status = "success"
-            logger.info(
-                "Wrote social_snapshots row: followers=%s posts_last_7d=%s confidence=%s",
-                follower_count,
-                posts_last_7d,
-                confidence,
-            )
+                )
 
     except Exception as e:
         err_msg = str(e)
@@ -272,33 +279,33 @@ def run():
     finally:
         # SOCIAL-05 / D-08 / RESEARCH.md Pattern 3: ALWAYS write apify_run_logs row.
         try:
-            conn = get_db()
-            conn.execute(
-                """
-                INSERT INTO apify_run_logs
-                  (scraper_run_id, apify_run_id, actor_id, actor_version,
-                   competitor_id, platform, market_code, status,
-                   dataset_count, cost_usd, error_message,
-                   started_at, finished_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    run_id,
-                    apify_run_obj.get("id"),
-                    ACTOR_ID,
-                    ACTOR_BUILD,
-                    PHASE_1_COMPETITOR_ID,
-                    PHASE_1_PLATFORM,
-                    PHASE_1_MARKET_CODE,
-                    apify_status,
-                    len(items) if items else 0,
-                    float(apify_run_obj.get("usageTotalUsd") or 0.0),
-                    err_msg,
-                    apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
-                    apify_run_obj.get("finishedAt"),
-                ),
-            )
-            conn.commit()
+            with closing(get_db()) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO apify_run_logs
+                      (scraper_run_id, apify_run_id, actor_id, actor_version,
+                       competitor_id, platform, market_code, status,
+                       dataset_count, cost_usd, error_message,
+                       started_at, finished_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        apify_run_obj.get("id"),
+                        ACTOR_ID,
+                        ACTOR_BUILD,
+                        PHASE_1_COMPETITOR_ID,
+                        PHASE_1_PLATFORM,
+                        PHASE_1_MARKET_CODE,
+                        apify_status,
+                        len(items) if items else 0,
+                        float(apify_run_obj.get("usageTotalUsd") or 0.0),
+                        err_msg,
+                        apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
+                        apify_run_obj.get("finishedAt"),
+                    ),
+                )
+                conn.commit()
         except Exception as e:
             logger.exception("Failed to insert apify_run_logs row: %s", e)
 
