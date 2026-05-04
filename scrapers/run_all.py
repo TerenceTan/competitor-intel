@@ -264,5 +264,24 @@ def main():
     sys.exit(0 if all_ok else 1)
 
 
+def main_single(script_name: str) -> int:
+    """Run exactly one scraper through the full hardening pipeline (timeout +
+    healthcheck ping). Used by cron entries that want per-scraper cadence
+    while still routing through this orchestrator (so HC.io ping stays in one
+    place — see SCRAPER_SCHEDULE.md).
+    """
+    if script_name not in SCRIPTS:
+        print(
+            f"ERROR: '{script_name}' not in SCRIPTS list. Valid: {', '.join(SCRIPTS)}",
+            file=sys.stderr,
+        )
+        return 2
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    success, _elapsed, _output = run_script(script_name)
+    return 0 if success else 1
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        sys.exit(main_single(sys.argv[1]))
     main()
