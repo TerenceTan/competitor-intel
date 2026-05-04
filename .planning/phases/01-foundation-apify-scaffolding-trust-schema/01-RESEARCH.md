@@ -1154,32 +1154,37 @@ JSONL line shape per D-19:
 | A6 | The Apify run object's `usageTotalUsd` field is populated for synchronous `.call()` returns | Pattern 3, schema for `apify_run_logs.cost_usd` | MEDIUM — verified that the field exists in the Apify v2 API response shape, but the synchronous `.call()` may return before final usage settlement. If `usageTotalUsd` is null on first read, fall back to `client.run(run["id"]).get()` after a short delay |
 | A7 | Local Python 3.9.6 is fine for development of non-Apify code in Phase 1; only `apify_social.py` requires Python 3.10+ | Environment Availability | LOW — developers can run schema migrations, calibration validator, and Drizzle changes on 3.9; only `apify_social.py` import will fail. Workaround: pyenv install 3.10 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **EC2 Python version (≥3.10 required by apify-client 2.5.0)?**
    - What we know: `scrapers/requirements.txt` doesn't pin a Python version; PROJECT.md says "Python 3" generically.
    - What's unclear: whether EC2 has 3.10+ or just 3.9.x.
    - Recommendation: Phase 1 task #0 is `ssh ec2 && python3 --version`. If <3.10, add an "install Python 3.10" task before any Apify deploy. Block the Apify cutover task until Python is confirmed.
+   - **RESOLVED:** Plan 01 Task 0 (new, type `checkpoint:human-action`) requires the operator to SSH the EC2 instance and verify `python3 --version` ≥ 3.10. The verified version is recorded in `.planning/phases/01-foundation-apify-scaffolding-trust-schema/EC2_PYTHON_VERIFIED.txt` (one line: `Python 3.X.Y verified on YYYY-MM-DD`). If EC2 reports <3.10, the operator must install Python 3.10+ (e.g., via deadsnakes PPA or pyenv) and re-run the verification before any Plan 03 deploy. Plan 03 (Apify scraper) depends on Plan 01 completing, so Plan 03 cannot run until this verification gate passes.
 
 2. **Should the redaction filter be applied to `print()` calls in existing scrapers?**
    - What we know: D-12 says "applied across all scrapers" but `print()` bypasses `logging`.
    - What's unclear: whether existing scrapers ever `print()` a secret (a quick grep of the existing files shows they don't, but that's not a guarantee).
    - Recommendation: Phase 1 plan adds a verification task — `grep -rE '(API_KEY|TOKEN|PASSWORD|SECRET)' scrapers/*.py | grep -v "os.environ"` — and if no hits, defer the `print()` shim to a future maintenance pass. If hits found, fix in same PR.
+   - **RESOLVED:** Defer the `print()` shim per Assumption A5 — existing scrapers do not print secrets (verified by reading social_scraper.py and other entry points; no `(API_KEY|TOKEN|PASSWORD|SECRET)` literals appear outside `os.environ` reads). Phase 1 ships the redaction filter via `install_redaction()` at every NEW entry point that uses `logging` (apify_social.py, run_all.py, validate_extraction.py). A maintenance pass to convert existing `print()` calls in legacy scrapers is deferred to a future phase; this is captured as a follow-up note in Plan 02's SUMMARY rather than a Phase 1 task.
 
 3. **Where does the Apify actor version pin get documented for ops?**
    - What we know: D-04 says "version pinned to a specific tag". Code comment + runbook entry recommended.
    - What's unclear: which file is the runbook (no `RUNBOOK.md` in repo).
    - Recommendation: Phase 1 plan creates `docs/APIFY_RUNBOOK.md` (or appends to existing `SCRAPER_SCHEDULE.md`) with: pinned actor versions, Apify cap setting steps, HC.io URL provisioning steps, secret rotation procedure. One file per integration.
+   - **RESOLVED:** Plan 03 Task 0 (new, type `checkpoint:human-action`) requires the operator to verify the actor build tag from Apify Console > Store > apify/facebook-posts-scraper > Builds and record the verified tag in `.planning/phases/01-foundation-apify-scaffolding-trust-schema/APIFY_BUILD_VERIFIED.txt` (format: `apify/facebook-posts-scraper build=X.Y.Z verified YYYY-MM-DD`). The pin is then hardcoded into `scrapers/apify_social.py` `ACTOR_BUILD` constant by the next code task in Plan 03. A future doc task (deferred to a Phase 5 polish or maintenance pass) creates `docs/APIFY_RUNBOOK.md` consolidating pinned versions, cap settings, HC.io provisioning, and secret rotation procedures. For Phase 1, the verified-build artifact in the phase directory plus the code-comment in apify_social.py are sufficient.
 
 4. **Healthchecks.io account ownership?**
    - What we know: D-09 says HC.io free tier; this is a manual operator step.
    - What's unclear: who owns the HC.io account (team-shared inbox? individual?).
    - Recommendation: use a team-shared inbox for the HC.io account so alerts don't depend on one person's email. Document in runbook.
+   - **RESOLVED:** Use a team-shared inbox (existing Pepperstone web team distribution list) for the Healthchecks.io account so alerts do not depend on a single person's email. The operator who provisions the HC.io project (per Plan 04 user_setup) is responsible for using the shared inbox at signup. This is documented in Plan 04's user_setup `dashboard_config` task and surfaced again in the future runbook (deferred per Q3 resolution above).
 
 5. **Does `extraction_confidence` need migration of existing rows?**
    - What we know: D-18 says "populated at insert" — null on legacy rows is acceptable. Phase 5 UI treats null as "no badge."
    - What's unclear: confirmation from product side that legacy rows showing "no badge" is acceptable UX (vs e.g., backfilling everything to "medium").
    - Recommendation: ship as null; document in Phase 5 plan as expected behavior.
+   - **RESOLVED:** Ship as null per D-18. Legacy rows in `promo_snapshots` and `social_snapshots` get `extraction_confidence = NULL` after the Plan 01 ALTER TABLE migrations. Phase 5 UI treats null as "no confidence badge displayed" — the absence of a badge is the visual signal that the row pre-dates the confidence pipeline. No backfill is performed. This decision is recorded in the Phase 1 SUMMARY for Phase 5 to reference when wiring the confidence-badge component.
 
 ## Environment Availability
 

@@ -33,7 +33,20 @@ This milestone replaces the broken Thunderbit social pipeline with Apify, fans s
   3. A Data Health page at `/admin/data-health` lists every scraper, its last successful run timestamp, zero-result counts (last 7 days), and Apify cost-to-date — giving the team a single triage surface from day one
   4. A scheduled scraper run that hangs longer than 30 minutes is killed by `run_all.py` and other scrapers continue; a healthcheck ping confirms each scheduled job's success within hours, not days
   5. A 20–30-item hand-labeled calibration set per non-English language (TH, VN, TW, HK, ID) exists in the repo with measured extraction accuracy — markets failing the ≥85% bar are flagged before Phase 3 goes live
-**Plans**: TBD
+**Plans**: 6 plans
+
+Plans:
+**Wave 1**
+- [ ] 01-01-PLAN.md — Schema deltas (apify_run_logs + share_of_search_snapshots tables; extraction_confidence columns) + Drizzle mirror + apify-client pin
+- [ ] 01-02-PLAN.md — Log redaction filter (scrapers/log_redaction.py) + unit tests; foundation for safe Apify scraper logging
+- [ ] 01-06-PLAN.md — EXTRACT-05 calibration set (JSONL) + per-language accuracy validator (parallelizable; deferrable per D-21)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 01-03-PLAN.md — Apify FB scraper (scrapers/apify_social.py) with zero-result guard + apify_run_logs writes; SCRAPERS constant updated
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 01-04-PLAN.md — run_all.py hardening: per-scraper timeout (1800s) + Healthchecks.io ping helper; apify_social.py registered in SCRIPTS
+- [ ] 01-05-PLAN.md — EmptyState extension (scraper-failed variant) + /admin/data-health page + remove FB Thunderbit code from social_scraper.py
 
 ### Phase 2: Per-Market Social Fanout (8 APAC Markets)
 **Goal**: Marketing managers operating in any of the 8 APAC v1 markets (SG, HK, TW, MY, TH, PH, ID, VN) can open `/markets/<code>` and see Facebook, Instagram, and X data that is genuinely market-specific — not global content guessed at by content inference — for the competitors that have a per-market presence, with clean fallback for those that don't.
@@ -91,7 +104,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Apify + Scaffolding + Trust Schema | 0/TBD | Not started | - |
+| 1. Foundation — Apify + Scaffolding + Trust Schema | 0/6 | Not started | - |
 | 2. Per-Market Social Fanout (8 APAC Markets) | 0/TBD | Not started | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |
