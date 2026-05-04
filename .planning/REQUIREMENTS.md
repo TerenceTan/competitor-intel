@@ -64,8 +64,8 @@ Confidence and freshness indicators baked in from Phase 1 as a v1 data-trust con
 - [ ] **TRUST-01**: `extraction_confidence TEXT` column added to `promo_snapshots` and `social_snapshots`; scrapers populate it at insert time (no backfill is feasible)
 - [ ] **TRUST-02**: Per-market dashboard views display a freshness pill (GREEN <24h / YELLOW 1–7d / RED >7d-or-failed) on every promo, social, and SoS panel
 - [ ] **TRUST-03**: Each row hover/tooltip exposes scrape time, source URL, parse status — letting marketing managers verify before acting on a data point
-- [ ] **TRUST-04**: Scraper-failed rows render an `<EmptyState reason="scraper-failed">` component, visually distinct from "no competitor activity" — preventing confusion of silent failure with genuine inactivity
-- [ ] **TRUST-05**: A Data Health page (`/admin/data-health`) lists per-scraper status, last successful run, zero-result counts (last 7 days), and Apify cost-to-date — operational triage surface for the team
+- [x] **TRUST-04**: Scraper-failed rows render an `<EmptyState reason="scraper-failed">` component, visually distinct from "no competitor activity" — preventing confusion of silent failure with genuine inactivity *(Plan 01-05: src/components/shared/empty-state.tsx extended in place with optional `reason?: 'scraper-failed' | 'scraper-empty' | 'no-activity'` prop; scraper-failed variant uses bg-red-50 border-red-200 + AlertOctagon palette consistent with stale-data-banner.tsx; backward-compatible — all 6 existing import sites compile unchanged)*
+- [x] **TRUST-05**: A Data Health page (`/admin/data-health`) lists per-scraper status, last successful run, zero-result counts (last 7 days), and Apify cost-to-date — operational triage surface for the team *(Plan 01-05: src/app/(dashboard)/admin/data-health/page.tsx force-dynamic server component runs 3 parallel Drizzle queries (latest scraperRuns, monthly apifyRunLogs SUM(cost_usd), 7d apifyRunLogs status='empty' COUNT GROUP BY actor_id); cost panel uses Intl.NumberFormat USD with color-coded threshold (≥70% red, ≥40% amber); auth gated by existing src/middleware.ts via (dashboard) route group)*
 
 ### Maintenance Infrastructure (cross-cutting, Phase 1)
 
@@ -151,8 +151,8 @@ Populated by gsd-roadmapper on 2026-05-04 after ROADMAP.md creation.
 | TRUST-01 | Phase 1 | Pending |
 | TRUST-02 | Phase 5 | Pending |
 | TRUST-03 | Phase 5 | Pending |
-| TRUST-04 | Phase 1 | Pending |
-| TRUST-05 | Phase 1 | Pending |
+| TRUST-04 | Phase 1 | Complete (Plan 01-05) |
+| TRUST-05 | Phase 1 | Complete (Plan 01-05) |
 | INFRA-01 | Phase 1 | Pending |
 | INFRA-02 | Phase 1 | Complete (Plan 01-04) |
 | INFRA-03 | Phase 1 | Complete (Plan 01-02) |

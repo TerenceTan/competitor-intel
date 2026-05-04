@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Plan 01-04 complete; Wave 3 first plan landed (run_all.py hardened with 1800s subprocess timeout + HC.io ping helper); only Plan 01-05 (Data Health page) remains in Phase 1; operator follow-ups for Plan 04 are 9 HEALTHCHECK_URL_* env vars + 9 HC.io checks
-last_updated: "2026-05-04T06:36:53Z"
-last_activity: 2026-05-04 -- Plan 01-04 executed (scrapers/run_all.py timeout + healthcheck wrapper + scrapers/test_run_all_smoke.py 5 unittest cases; INFRA-02 + INFRA-04 closed)
+stopped_at: Phase 1 complete — all 6 plans shipped (01-01..01-06); TRUST-04 + TRUST-05 closed; FB cutover from Thunderbit to apify_social.py final; ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups (Apify token + cap, EC2 Python check + pip install + smoke run, 9 Healthchecks.io URLs) are completed
+last_updated: "2026-05-04T06:48:13Z"
+last_activity: 2026-05-04 -- Plan 01-05 executed (EmptyState reason-prop extension + /admin/data-health page + FB Thunderbit removal from social_scraper.py; TRUST-04 + TRUST-05 closed; Phase 1 complete)
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -25,31 +25,31 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 
 ## Current Position
 
-Phase: 01 (foundation-apify-scaffolding-trust-schema) — EXECUTING
-Plan: 5 of 6 complete (next: 01-05 EmptyState scraper-failed variant + /admin/data-health page + Thunderbit FB removal — Wave 3 final)
-Status: Executing Phase 01 — Wave 3 in progress (01-04 done)
-Last activity: 2026-05-04 -- Plan 01-04 executed (scrapers/run_all.py timeout + healthcheck wrapper + scrapers/test_run_all_smoke.py 5 unittest cases; INFRA-02 + INFRA-04 closed)
+Phase: 01 (foundation-apify-scaffolding-trust-schema) — COMPLETE (all 6 plans shipped)
+Plan: 6 of 6 complete (01-05 final wave-3 plan landed: EmptyState scraper-failed variant + /admin/data-health page + Thunderbit FB removal)
+Status: Phase 1 complete — ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups are completed
+Last activity: 2026-05-04 -- Plan 01-05 executed (EmptyState reason-prop extension + /admin/data-health page + FB Thunderbit removal from social_scraper.py; TRUST-04 + TRUST-05 closed; Phase 1 complete)
 
-Progress: [████████▎░] 83%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5 (01-01, 01-02, 01-06, 01-03, 01-04)
-- Average duration: ~8.4 min
-- Total execution time: ~42 min
+- Total plans completed: 6 (01-01, 01-02, 01-06, 01-03, 01-04, 01-05)
+- Average duration: ~7.7 min
+- Total execution time: ~46 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01    | 5     | ~42m  | ~8.4m    |
+| 01    | 6     | ~46m  | ~7.7m    |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-04 (~3m), 01-03 (~3m), 01-02 (~3m), 01-06 (~30m), 01-01 (~3m)
-- Trend: Wave 3 first plan (01-04 run_all hardening) closed in ~3m — same shape as the small atomic Wave 1/2 plans. Phase 1 has held a tight ~3-min cadence on every wiring plan; the only ~30-min outlier is 01-06 (calibration validator). Final Phase 1 plan (01-05 Data Health page) is a UI plan and may extend beyond ~3m.
+- Last 6 plans: 01-05 (~4m), 01-04 (~3m), 01-03 (~3m), 01-02 (~3m), 01-06 (~30m), 01-01 (~3m)
+- Trend: Phase 1 final plan (01-05 — UI extension + new admin page + scraper refactor across 3 files) closed in ~4m, slightly above the wiring-plan ~3-min cadence and well below the ~30-min calibration-validator outlier (01-06). Phase 1 cadence held: 5 of 6 plans landed in ~3-4 min; only 01-06 was a multi-file dataset+validator with extensive review.
 
 *Updated after each plan completion*
 
@@ -82,6 +82,14 @@ Recent decisions affecting current work:
 - Plan 01-04: Per-script log header expanded from 2 lines (Run at: + Exit code:) to 3 lines (Run at: + new Status: TIMEOUT|OK|FAILED + Exit code:) — preserves backward-compat for any external log-parsing automation while making OK/FAILED/TIMEOUT triage immediately scannable
 - Plan 01-04: Smoke tests deliberately do NOT mock subprocess.run — RESEARCH.md "Don't Hand-Roll" guidance: subprocess.run(timeout=) is documented Python stdlib and trusting it at this layer is appropriate; integration test is implicit in EC2 cron run
 - Plan 01-04: Belt-and-braces tearDown: pop HEALTHCHECK_URL_APIFY_SOCIAL unconditionally even when setUp didn't capture a saved value — defends against test pollution if a future test or harness sets the env var out of band
+- Plan 01-05: Extended src/components/shared/empty-state.tsx in place rather than creating src/components/ui/empty-state.tsx (D-16 reconciliation per PATTERNS.md + RESEARCH.md Pattern 6) — 6 existing import sites resolve to shared/, splitting them would force every caller to update its import; backward-compatible new prop is byte-identical at runtime when undefined
+- Plan 01-05: RESEARCH.md Patterns 6 and 7 shipped verbatim — same posture as 01-02/01-03/01-04; diverging from a reviewed, requirement-anchored pattern is not safer than shipping it
+- Plan 01-05: scraper-failed EmptyState variant reuses bg-red-50 border-red-200 from stale-data-banner.tsx — dashboard speaks one consistent visual language for "data trust problem" across chrome (top banner) and content (inline empty state) layers
+- Plan 01-05: Inner icon container background hard-coded to bg-white (not preset.bg) so the colored outer container provides the semantic signal while the icon stays high-contrast — matches stale-data-banner.tsx visual treatment
+- Plan 01-05: APIFY_MONTHLY_CAP_USD = 100 hard-coded as a module constant rather than reading from env — D-06 specifies $100; Apify Console-side cap is the authoritative defense; the dashboard value is for operator visibility and changes ~yearly at most
+- Plan 01-05: Cost color thresholds 70%/40% chosen so red triggers BEFORE the cap is hit (operational headroom for the operator); same shape Phase 5 will reuse for freshness pill thresholds
+- Plan 01-05: Surgical deletion of fetch_facebook_stats / _fetch_facebook_legacy / _FB_SCHEMA over deprecation-stub — verified via grep that no other module imports them, deletion is lower-risk than living deprecation stubs that future readers might re-discover and re-wire
+- Plan 01-05: FB call site replaced with `_ = fb_slug` no-op rather than removing the fb_slug extraction from the destructure block above — touching the destructure for cleanliness would expand the diff into the IG/X paths and risk an unrelated regression for a Phase-2-owned scraper
 
 ### Pending Todos
 
@@ -106,6 +114,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-04T06:36:53Z
-Stopped at: Plan 01-04 complete; Wave 3 first plan landed (run_all.py hardened with 1800s subprocess timeout + HC.io ping helper); only Plan 01-05 (Data Health page) remains in Phase 1; operator follow-ups for Plan 04 are 9 HEALTHCHECK_URL_* env vars + 9 HC.io checks
-Resume file: .planning/phases/01-foundation-apify-scaffolding-trust-schema/01-05-PLAN.md
+Last session: 2026-05-04T06:48:13Z
+Stopped at: Phase 1 complete — all 6 plans shipped (01-01..01-06); TRUST-04 + TRUST-05 closed; FB cutover from Thunderbit to apify_social.py final; ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups (Apify token + cap, EC2 Python check + pip install + smoke run, 9 Healthchecks.io URLs) are completed
+Resume file: (Phase 1 complete — next is /gsd-transition or /gsd-execute-phase 02)

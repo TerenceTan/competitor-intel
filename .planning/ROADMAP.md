@@ -46,7 +46,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 01-04-PLAN.md — run_all.py hardening: per-scraper timeout (1800s) + Healthchecks.io ping helper; apify_social.py registered in SCRIPTS
-- [ ] 01-05-PLAN.md — EmptyState extension (scraper-failed variant) + /admin/data-health page + remove FB Thunderbit code from social_scraper.py
+- [x] 01-05-PLAN.md — EmptyState extension (scraper-failed variant) + /admin/data-health page + remove FB Thunderbit code from social_scraper.py
 
 ### Phase 2: Per-Market Social Fanout (8 APAC Markets)
 **Goal**: Marketing managers operating in any of the 8 APAC v1 markets (SG, HK, TW, MY, TH, PH, ID, VN) can open `/markets/<code>` and see Facebook, Instagram, and X data that is genuinely market-specific — not global content guessed at by content inference — for the competitors that have a per-market presence, with clean fallback for those that don't.
@@ -104,7 +104,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation — Apify + Scaffolding + Trust Schema | 5/6 | In progress (Wave 3: 01-04 done, 01-05 pending) | - |
+| 1. Foundation — Apify + Scaffolding + Trust Schema | 6/6 | Complete (operator follow-ups outstanding before Phase 2 EC2 deploy) | 2026-05-04 |
 | 2. Per-Market Social Fanout (8 APAC Markets) | 0/TBD | Not started | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |
