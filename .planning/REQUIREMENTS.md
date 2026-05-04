@@ -118,17 +118,59 @@ Explicitly excluded for this milestone. Documented to prevent scope creep.
 
 ## Traceability
 
-To be populated by gsd-roadmapper after roadmap creation.
+Populated by gsd-roadmapper on 2026-05-04 after ROADMAP.md creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (Populated by roadmapper) | — | Pending |
+| SOCIAL-01 | Phase 1 | Pending |
+| SOCIAL-02 | Phase 2 | Pending |
+| SOCIAL-03 | Phase 2 | Pending |
+| SOCIAL-04 | Phase 1 | Pending |
+| SOCIAL-05 | Phase 1 | Pending |
+| SOCIAL-06 | Phase 1 | Pending |
+| MARKET-01 | Phase 2 | Pending |
+| MARKET-02 | Phase 2 | Pending |
+| MARKET-03 | Phase 2 | Pending |
+| MARKET-04 | Phase 2 | Pending |
+| EXTRACT-01 | Phase 3 | Pending |
+| EXTRACT-02 | Phase 3 | Pending |
+| EXTRACT-03 | Phase 3 | Pending |
+| EXTRACT-04 | Phase 3 | Pending |
+| EXTRACT-05 | Phase 1 | Pending |
+| SOS-01 | Phase 3 | Pending |
+| SOS-02 | Phase 3 | Pending |
+| SOS-03 | Phase 3 | Pending |
+| SOS-04 | Phase 3 | Pending |
+| SOS-05 | Phase 3 | Pending |
+| AI-01 | Phase 4 | Pending |
+| AI-02 | Phase 4 | Pending |
+| AI-03 | Phase 4 | Pending |
+| AI-04 | Phase 4 | Pending |
+| AI-05 | Phase 4 | Pending |
+| AI-06 | Phase 4 | Pending |
+| TRUST-01 | Phase 1 | Pending |
+| TRUST-02 | Phase 5 | Pending |
+| TRUST-03 | Phase 5 | Pending |
+| TRUST-04 | Phase 1 | Pending |
+| TRUST-05 | Phase 1 | Pending |
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Pending |
+| INFRA-04 | Phase 1 | Pending |
+| INFRA-05 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: TBD (set by roadmapper)
-- Unmapped: TBD
+- v1 requirements: 36 total (note: planning context referenced "32 total"; the actual REQUIREMENTS.md file contains 36 — 6 SOCIAL + 4 MARKET + 5 EXTRACT + 5 SOS + 6 AI + 5 TRUST + 5 INFRA — all are mapped)
+- Mapped to phases: 36 / 36 (100%)
+- Unmapped: 0
+
+**Coverage by phase:**
+- Phase 1 (Foundation): 13 requirements — SOCIAL-01, SOCIAL-04, SOCIAL-05, SOCIAL-06, EXTRACT-05, TRUST-01, TRUST-04, TRUST-05, INFRA-01..05
+- Phase 2 (Per-market Social Fanout): 6 requirements — SOCIAL-02, SOCIAL-03, MARKET-01..04
+- Phase 3 (BigQuery + Better Extraction): 9 requirements — EXTRACT-01..04, SOS-01..05
+- Phase 4 (Per-market AI Recs): 6 requirements — AI-01..06
+- Phase 5 (Confidence/Freshness UX Polish): 2 requirements — TRUST-02, TRUST-03
 
 ---
 *Requirements defined: 2026-05-04*
-*Last updated: 2026-05-04 after initial definition*
+*Last updated: 2026-05-04 after roadmap traceability mapping*
