@@ -134,6 +134,70 @@ def get_db() -> sqlite3.Connection:
         except Exception:
             pass  # column already exists
 
+    # Additive migration: extraction_confidence on promo_snapshots (Phase 1, TRUST-01)
+    try:
+        conn.execute("ALTER TABLE promo_snapshots ADD COLUMN extraction_confidence TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Additive migration: extraction_confidence on social_snapshots (Phase 1, TRUST-01)
+    try:
+        conn.execute("ALTER TABLE social_snapshots ADD COLUMN extraction_confidence TEXT")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # New table: apify_run_logs (Phase 1, SOCIAL-05, D-08)
+    # Per-actor-run diagnostics for Apify-based scrapers — surfaced on /admin/data-health.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS apify_run_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scraper_run_id INTEGER REFERENCES scraper_runs(id),
+            apify_run_id TEXT,
+            actor_id TEXT NOT NULL,
+            actor_version TEXT,
+            competitor_id TEXT NOT NULL REFERENCES competitors(id),
+            platform TEXT NOT NULL,
+            market_code TEXT NOT NULL DEFAULT 'global',
+            status TEXT NOT NULL,
+            dataset_count INTEGER DEFAULT 0,
+            cost_usd REAL,
+            error_message TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_apify_runs_competitor_platform_market
+        ON apify_run_logs (competitor_id, platform, market_code)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_apify_runs_started_at
+        ON apify_run_logs (started_at DESC)
+    """)
+    conn.commit()
+
+    # New table: share_of_search_snapshots (Phase 1 schema delta only — Phase 3 owns sync code)
+    # Per INFRA-05: nightly BigQuery → SQLite sync of Share of Search joined per-market.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS share_of_search_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_code TEXT NOT NULL,
+            term TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            share_of_search REAL NOT NULL,
+            captured_at TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            UNIQUE (market_code, term, brand, captured_at)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_sos_market_brand
+        ON share_of_search_snapshots (market_code, brand)
+    """)
+    conn.commit()
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
