@@ -9,7 +9,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { SCRAPERS } from "@/lib/constants";
+import { SCRAPERS, ACTOR_TO_SCRAPER } from "@/lib/constants";
 import { formatDateTime } from "@/lib/utils";
 
 // Force-dynamic — this page reads SQLite at request time. Inherits the
@@ -126,13 +126,12 @@ export default async function DataHealthPage() {
           <TableBody>
             {SCRAPERS.map((s) => {
               const latest = latestByScraper.get(s.dbName);
-              // Approximate match: zero-result actor IDs include the scraper
-              // slug (e.g., apify_social) — only Apify-backed scrapers appear
-              // here so the lookup naturally returns 0 for non-Apify scrapers.
+              // Equality lookup via ACTOR_TO_SCRAPER (single source of truth in @/lib/constants).
+              // Replaces a substring match that silently returned 0 because actor_id
+              // ("apify/facebook-posts-scraper") never contains the dbName ("apify_social") —
+              // see code review WR-01 / verification SC3.
               const zr =
-                zeroCounts.find(
-                  (z) => z.actorId.includes(s.name) || z.actorId.includes(s.dbName),
-                )?.count ?? 0;
+                zeroCounts.find((z) => ACTOR_TO_SCRAPER[z.actorId] === s.dbName)?.count ?? 0;
               const statusLabel = latest?.status ?? "never run";
               const statusClass =
                 latest?.status === "success"
