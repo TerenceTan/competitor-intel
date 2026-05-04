@@ -12,7 +12,7 @@ import {
   wikifxSnapshots,
   accountTypeSnapshots,
 } from "@/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { parseMarketParam, MARKET_NAMES } from "@/lib/markets";
 import {
@@ -92,6 +92,7 @@ export default async function CompetitorDetailPage({
     changes,
     latestWikifx,
     latestAccountTypes,
+    socialScraperFailures,
   ] = await Promise.all([
     db
       .select()
@@ -163,6 +164,26 @@ export default async function CompetitorDetailPage({
       .orderBy(desc(accountTypeSnapshots.snapshotDate), desc(accountTypeSnapshots.id))
       .limit(1)
       .then((r) => r[0] ?? null),
+
+    // Recent scraper-failure events for the social platforms (gap closure SC2 / TRUST-04).
+    // Window: last 7 days — long enough that a missed daily/weekly cron is still visible,
+    // short enough that a one-off failure from a month ago doesn't permanently flag the card.
+    // Narrow query (one fieldName, one competitorId, one bounded window) keeps it <1ms; the
+    // existing `changes` query above is LIMIT 50 ORDER BY detectedAt and would silently miss
+    // a recent scraper_zero_results row if 50 newer events exist, so this is a separate fetch.
+    db
+      .select({
+        domain: changeEvents.domain,
+        detectedAt: changeEvents.detectedAt,
+      })
+      .from(changeEvents)
+      .where(
+        and(
+          eq(changeEvents.competitorId, id),
+          eq(changeEvents.fieldName, "scraper_zero_results"),
+          gte(changeEvents.detectedAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+        ),
+      ),
   ]);
 
   // Per-market App Store ratings for the iOS card.
@@ -276,6 +297,17 @@ export default async function CompetitorDetailPage({
   const socialMarketOverride: Record<string, boolean> = {};
   for (const platform of Object.keys(socialMap)) {
     socialMarketOverride[platform] = market != null && socialMap[platform].marketCode === market;
+  }
+
+  // Per-platform set of platforms with a recent scraper_zero_results event.
+  // domain on a change_events row is "social_{platform}" (see scrapers/apify_social.py:196).
+  // Used by the Digital Presence tab to render <EmptyState reason="scraper-failed"> instead
+  // of the silent plain-text fallback when a card has no snapshot AND a recent failure exists.
+  const socialScraperFailedPlatforms = new Set<string>();
+  for (const ev of socialScraperFailures) {
+    if (ev.domain.startsWith("social_")) {
+      socialScraperFailedPlatforms.add(ev.domain.slice("social_".length));
+    }
   }
 
   const tierColors: Record<number, string> = {
@@ -800,11 +832,7 @@ export default async function CompetitorDetailPage({
                       </span>
                     )}
                   </div>
-                  {!snap ? (
-                    <p className="text-gray-400 text-sm">
-                      N/A — Data unavailable
-                    </p>
-                  ) : (
+                  {snap ? (
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Followers</span>
@@ -832,6 +860,16 @@ export default async function CompetitorDetailPage({
                         Updated {timeAgo(snap.snapshotDate)}
                       </p>
                     </div>
+                  ) : socialScraperFailedPlatforms.has(platform) ? (
+                    <EmptyState
+                      reason="scraper-failed"
+                      title="Scraper returned zero results"
+                      description="The most recent run for this platform produced no data. Triage on /admin/data-health."
+                    />
+                  ) : (
+                    <p className="text-gray-400 text-sm">
+                      N/A — Data unavailable
+                    </p>
                   )}
                 </Card>
               );
