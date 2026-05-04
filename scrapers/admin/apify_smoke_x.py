@@ -50,40 +50,61 @@ def main() -> int:
     print(f"=== Apify X smoke: {ACTOR_ID} → @{HANDLE} ===")
     client = ApifyClient(token)
 
-    # Try multiple input shapes — first that the actor accepts wins.
-    # All include maxItems=1 to keep cost at $0.00025/attempt.
+    # Try multiple input shapes — first that returns REAL data wins.
+    # Detection of mock data is critical: this actor charges for mock placeholders
+    # when the username lookup fails (15 × $0.00025 = $0.0038 per failed attempt).
     candidates = [
-        ({"twitterHandles": [HANDLE], "maxItems": 1}, "twitterHandles"),
+        # searchTerms reordered first because the actor's previous log mentioned it
         ({"searchTerms": [f"from:{HANDLE}"], "maxItems": 1}, "searchTerms (from:)"),
-        ({"queries": [f"from:{HANDLE}"], "maxItems": 1}, "queries"),
+        ({"searchTerms": [HANDLE], "maxItems": 1}, "searchTerms (bare handle)"),
         ({"query": f"from:{HANDLE}", "maxItems": 1}, "query (singular)"),
+        ({"queries": [f"from:{HANDLE}"], "maxItems": 1}, "queries"),
         ({"startUrls": [{"url": f"https://x.com/{HANDLE}"}], "maxItems": 1}, "startUrls"),
-        ({"urls": [f"https://x.com/{HANDLE}"], "maxItems": 1}, "urls"),
+        ({"twitterHandles": [HANDLE], "maxItems": 1}, "twitterHandles"),
     ]
+
+    def _is_real(items: list) -> bool:
+        """A run is real if at least one item is not a mock placeholder."""
+        if not items:
+            return False
+        for it in items:
+            if it.get("type") == "mock_tweet":
+                continue
+            if "From KaitoEasyAPI, a reminder" in (it.get("text") or ""):
+                continue
+            return True
+        return False
+
     run = None
+    final_items: list = []
     for run_input, label in candidates:
         print(f"\n--- attempt: {label} → {run_input} ---")
         try:
-            run = client.actor(ACTOR_ID).call(
+            r = client.actor(ACTOR_ID).call(
                 run_input=run_input,
                 max_total_charge_usd=PER_CALL_COST_CAP_USD,
             )
         except Exception as e:
             print(f"  !! {type(e).__name__}: {str(e)[:200]}")
             continue
-        if run is None:
+        if r is None:
             print("  !! actor.call returned None")
             continue
-        if run.get("status") == "FAILED":
-            # Some actors return a FAILED status object instead of raising
-            print(f"  !! actor FAILED: {run.get('statusMessage', '')[:200]}")
-            run = None
+        if r.get("status") == "FAILED":
+            print(f"  !! FAILED: {r.get('statusMessage', '')[:200]}")
             continue
-        # Got a non-failed run — use it
-        break
+        # Pull dataset items right away to detect mock placeholders
+        ds_id = r.get("defaultDatasetId")
+        items = list(client.dataset(ds_id).iterate_items()) if ds_id else []
+        print(f"  items returned: {len(items)}")
+        if items and _is_real(items):
+            run, final_items = r, items
+            break
+        if items:
+            print(f"  !! mock-data response (charged ~${0.00025 * len(items):.4f}); retrying next shape")
 
     if run is None:
-        print("\nERROR: every input shape failed. Inspect actor docs:", file=sys.stderr)
+        print("\nERROR: every input shape returned mocks or failed.", file=sys.stderr)
         print(f"  https://apify.com/{ACTOR_ID}", file=sys.stderr)
         return 2
 
@@ -92,17 +113,8 @@ def main() -> int:
     cost = run.get("usageTotalUsd") or (run.get("usage") or {}).get("totalUsd") or "(see run page)"
     print(f"cost: {cost}")
 
-    dataset_id = run.get("defaultDatasetId")
-    if not dataset_id:
-        print("ERROR: no dataset id", file=sys.stderr)
-        return 3
-
-    items = list(client.dataset(dataset_id).iterate_items())
-    print(f"dataset items: {len(items)}")
-    if not items:
-        print("WARNING: zero tweets returned — handle may be incorrect or X blocked the actor")
-        return 4
-
+    items = final_items
+    print(f"dataset items: {len(items)} (real data, not mocks)")
     tweet = items[0]
     # Print top-level keys so we know the schema
     print(f"\n=== Tweet object keys ({len(tweet)} total) ===")
