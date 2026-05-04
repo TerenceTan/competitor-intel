@@ -4,6 +4,34 @@ All notable changes to the Competitor Analysis Dashboard.
 
 ---
 
+## [Unreleased] — Phase 1 + Phase 2 Apify cutover (2026-05-04 → 2026-05-05)
+
+### Added
+
+- **Apify FB scraper for ic-markets** (`scrapers/apify_social.py`) replacing the broken Thunderbit FB code path (D-01). Pinned actor build `0.0.293`, `apify_run_logs` diagnostics table, zero-result silent-success guard, `extraction_confidence` per snapshot.
+- **Phase 2 Apify cutover for IG + X across all 11 competitors.** Same `apify_social.py` now batches three actor calls per run:
+  - `apify/instagram-profile-scraper` for follower counts
+  - `kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest` (with mock-data detection)
+  - `apify/facebook-posts-scraper` (5 posts/page) for activity signal
+  Total cost ~$0.36/run, ~$1.46/mo at weekly cadence — fits in Apify free tier ($5/mo platform credit).
+- **Schema deltas (Plan 01-01):** `apify_run_logs` table, `share_of_search_snapshots` table, `extraction_confidence` column on social/promo/pricing snapshot tables.
+- **Trust UX skeleton (Plan 01-05):** `<EmptyState reason="scraper-failed">` variant + `/admin/data-health` page surfacing per-actor zero-result counts.
+- **Operational hardening (Plan 01-04):** per-scraper 30-min subprocess timeout in `run_all.py` + Healthchecks.io ping helper. 9 HC.io checks provisioned + cron block in `SCRAPER_SCHEDULE.md`. `run_all.py` now accepts a single-script CLI arg so per-cadence cron entries route through the same orchestrator and inherit ping coverage.
+- **Log redaction filter** (`scrapers/log_redaction.py`) attached to root logger; Apify SDK Authorization headers stripped before reaching log files (April 2026 EC2 incident anchor).
+- **Calibration validator** (`scrapers/calibration/validate_extraction.py`) + JSONL skeleton for TH/VN/TW/HK/ID promo extraction (EXTRACT-05).
+
+### Changed
+
+- `social_scraper.py` is now **YouTube-only** (Google Data API). Instagram and X paths removed — Thunderbit account exhausted (HTTP 402 INSUFFICIENT_CREDITS), ScraperAPI HTTP 403'd on both. All three platforms now flow through Apify.
+- `/admin/data-health` `APIFY_MONTHLY_CAP_USD` constant updated to `5` (free-tier reality, was `100` per D-06's paid-tier assumption).
+- Dashboard `/admin` Run-Scraper API now uses `.venv/bin/python` (PEP-668 / venv-only `apify_client`) and routes through `run_all.py` so manual UI-triggered runs inherit HC.io ping + INFRA-02 timeout.
+
+### Marketing-portal integration *(action required)*
+
+The new social-platform data lives in `social_snapshots` rows but is **not yet exposed via `/api/v1/*`** — only `/api/v1/promotions` and `/api/v1/trends` are public. To consume IG/X/FB follower counts from marketing-portal, add `/api/v1/social-snapshots/route.ts` modeled on the existing `/api/v1/promotions` pattern (auth, rate-limit, query params already handled in `middleware.ts`). Counts as one of the four missing routes from the in-flight cutover.
+
+---
+
 ## [1.4.1] — 2026-04-15
 
 ### Security
