@@ -93,6 +93,8 @@ export default async function CompetitorDetailPage({
     latestWikifx,
     latestAccountTypes,
     socialScraperFailures,
+    peerSocialSnapshots,
+    allCompetitors,
   ] = await Promise.all([
     db
       .select()
@@ -184,6 +186,21 @@ export default async function CompetitorDetailPage({
           gte(changeEvents.detectedAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
         ),
       ),
+
+    // Peer social snapshots for the Digital Presence ranking widget.
+    // Pull recent snapshots for ALL competitors on each platform; we dedupe to
+    // "latest per (competitorId, platform, marketCode)" in JS below. Limited to
+    // a 30-day window so a competitor with stale data isn't artificially ranked.
+    db
+      .select()
+      .from(socialSnapshots)
+      .where(
+        gte(socialSnapshots.snapshotDate, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
+      )
+      .orderBy(desc(socialSnapshots.id)),
+
+    // Competitor names for labelling peer rows in the ranking widget.
+    db.select().from(competitors),
   ]);
 
   // Per-market App Store ratings for the iOS card.
@@ -308,6 +325,55 @@ export default async function CompetitorDetailPage({
     if (ev.domain.startsWith("social_")) {
       socialScraperFailedPlatforms.add(ev.domain.slice("social_".length));
     }
+  }
+
+  // Build peer-ranking map per platform (current market preferred, global fallback).
+  // Output shape: peerRanking[platform] = sorted [{competitorId, name, followers}]
+  // descending. Used by the Digital Presence tab to show "X ranks Nth of M".
+  const competitorNameMap: Record<string, string> = Object.fromEntries(
+    allCompetitors.map((c) => [c.id, c.name])
+  );
+  const peerLatestByKey = new Map<string, typeof peerSocialSnapshots[0]>();
+  for (const snap of peerSocialSnapshots) {
+    const key = `${snap.competitorId}|${snap.platform}|${snap.marketCode}`;
+    if (!peerLatestByKey.has(key)) peerLatestByKey.set(key, snap);
+  }
+  const peerRanking: Record<string, Array<{ competitorId: string; name: string; followers: number }>> = {};
+  for (const platform of ["facebook", "instagram", "x", "youtube"]) {
+    const wantMarket = market ?? "global";
+    const seen = new Set<string>();
+    const peers: Array<{ competitorId: string; name: string; followers: number }> = [];
+    // Prefer per-market rows for the requested market
+    for (const snap of peerLatestByKey.values()) {
+      if (snap.platform !== platform) continue;
+      if (snap.marketCode !== wantMarket) continue;
+      if (seen.has(snap.competitorId)) continue;
+      if (snap.followers == null || snap.followers <= 0) continue;
+      seen.add(snap.competitorId);
+      peers.push({
+        competitorId: snap.competitorId,
+        name: competitorNameMap[snap.competitorId] ?? snap.competitorId,
+        followers: snap.followers,
+      });
+    }
+    // Fill any missing competitor with their global row (so a peer present in
+    // global but absent in the requested market still shows in the ranking)
+    if (market) {
+      for (const snap of peerLatestByKey.values()) {
+        if (snap.platform !== platform) continue;
+        if (snap.marketCode !== "global") continue;
+        if (seen.has(snap.competitorId)) continue;
+        if (snap.followers == null || snap.followers <= 0) continue;
+        seen.add(snap.competitorId);
+        peers.push({
+          competitorId: snap.competitorId,
+          name: competitorNameMap[snap.competitorId] ?? snap.competitorId,
+          followers: snap.followers,
+        });
+      }
+    }
+    peers.sort((a, b) => b.followers - a.followers);
+    peerRanking[platform] = peers;
   }
 
   const tierColors: Record<number, string> = {
@@ -848,14 +914,99 @@ export default async function CompetitorDetailPage({
                           {snap.postsLast7d ?? "—"}
                         </span>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Engagement</span>
-                        <span className="text-gray-700 font-mono">
-                          {snap.engagementRate != null
-                            ? `${(snap.engagementRate * 100).toFixed(2)}%`
-                            : "—"}
-                        </span>
-                      </div>
+                      {/* Engagement only shown when we actually computed it
+                          (currently FB only — IG/X profile-level data doesn't
+                          give per-post likes/comments/shares without extra
+                          actor calls). Hiding instead of showing "—" keeps
+                          the card honest about what's measurable today. */}
+                      {snap.engagementRate != null && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500">Engagement</span>
+                          <span className="text-gray-700 font-mono">
+                            {`${(snap.engagementRate * 100).toFixed(2)}%`}
+                          </span>
+                        </div>
+                      )}
+                      {(() => {
+                        const peers = peerRanking[platform] ?? [];
+                        const myIdx = peers.findIndex((p) => p.competitorId === id);
+                        if (peers.length < 2 || myIdx < 0) return null;
+                        const leader = peers[0];
+                        const me = peers[myIdx];
+                        const ratio = leader.followers > 0 ? me.followers / leader.followers : 0;
+                        return (
+                          <div className="pt-3 border-t border-gray-100 space-y-2">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-gray-500">Industry rank</span>
+                              <span className="text-gray-700 font-medium">
+                                {myIdx + 1} of {peers.length}
+                              </span>
+                            </div>
+                            {myIdx > 0 && (
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-gray-500">vs. leader</span>
+                                <span className="text-gray-700 font-mono">
+                                  {leader.name} ({leader.followers.toLocaleString()})
+                                </span>
+                              </div>
+                            )}
+                            <div className="space-y-1 pt-1">
+                              {peers.slice(0, 6).map((p) => {
+                                const pct = leader.followers > 0
+                                  ? Math.max(2, Math.round((p.followers / leader.followers) * 100))
+                                  : 0;
+                                const isMe = p.competitorId === id;
+                                return (
+                                  <div key={p.competitorId} className="flex items-center gap-2">
+                                    <span
+                                      className={`w-16 truncate text-[10px] ${
+                                        isMe ? "text-primary font-semibold" : "text-gray-500"
+                                      }`}
+                                      title={p.name}
+                                    >
+                                      {p.name}
+                                    </span>
+                                    <div className="flex-1 h-1.5 bg-gray-100 rounded overflow-hidden">
+                                      <div
+                                        className={isMe ? "bg-primary h-full" : "bg-gray-400 h-full"}
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                    <span
+                                      className={`text-[10px] font-mono w-14 text-right ${
+                                        isMe ? "text-primary font-semibold" : "text-gray-500"
+                                      }`}
+                                    >
+                                      {p.followers.toLocaleString()}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                              {peers.length > 6 && myIdx >= 6 && (
+                                <div className="flex items-center gap-2 pt-0.5">
+                                  <span
+                                    className="w-16 truncate text-[10px] text-primary font-semibold"
+                                    title={me.name}
+                                  >
+                                    {me.name}
+                                  </span>
+                                  <div className="flex-1 h-1.5 bg-gray-100 rounded overflow-hidden">
+                                    <div
+                                      className="bg-primary h-full"
+                                      style={{
+                                        width: `${Math.max(2, Math.round(ratio * 100))}%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] font-mono w-14 text-right text-primary font-semibold">
+                                    {me.followers.toLocaleString()}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <p className="text-gray-400 text-xs pt-1">
                         Updated {timeAgo(snap.snapshotDate)}
                       </p>
