@@ -81,9 +81,14 @@ export default async function CompetitorDetailPage({
 
   if (!competitor) notFound();
 
-  // Compute time-window cutoffs ONCE at the top of the request so React 19's
-  // purity lint (react-hooks/purity) doesn't flag impure Date.now() calls
-  // inside the Drizzle query expressions below.
+  // Compute time-window cutoffs once at the top of the request. Server
+  // components are evaluated per-request on the server (not re-rendered on
+  // the client), so Date.now() is the correct way to source "now". React
+  // 19's react-hooks/purity rule is conservative and flags it anyway —
+  // disabled inline rather than refactored, because the alternative
+  // (passing `now` as a prop or using next/headers) doesn't apply to a
+  // page-level server component.
+  // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
   const sevenDaysAgoIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
   const thirtyDaysAgoDate = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
