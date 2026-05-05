@@ -9,22 +9,29 @@ extends it to all 11 competitors and adds IG + X actors so the broken
 Thunderbit / ScraperAPI paths in social_scraper.py can be removed.
 
 Per platform:
-  - Facebook: apify/facebook-posts-scraper (5 posts/page, batched)
-  - Instagram: apify/instagram-profile-scraper (batched)
-  - X / Twitter: kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest
-                 (batched via searchTerms with from: operator; mock-data detection)
+  - Facebook:  apify/facebook-pages-scraper (page metadata: followers, likes)
+             + apify/facebook-posts-scraper (5 posts/page for posts_last_7d
+                                              and engagement metrics)
+  - Instagram: apify/instagram-profile-scraper (profile + follower count)
+             + apify/instagram-post-scraper (5 posts/handle for posts_last_7d)
+  - X/Twitter: kaitoeasyapi cheapest tweet scraper, ~10 tweets/handle so we
+               can derive both follower count (from author object) AND
+               posts_last_7d (from tweet timestamps).
 
 Outputs per competitor × platform:
-  1. ``social_snapshots`` row on success (extraction_confidence per D-18)
+  1. ``social_snapshots`` row on success — followers, posts_last_7d,
+     engagement_rate (FB only), extraction_confidence (D-18)
   2. ``change_events`` row of ``scraper_zero_results`` when no data returned
   3. ``apify_run_logs`` row ALWAYS (success / empty / failure) for diagnostics
 
 Cost (free-tier-safe at weekly cadence):
-  IG (1 actor call, 11 profiles):                   ~$0.029
-  X  (1 actor call, ~220 tweets w/ batched terms):  ~$0.055
-  FB (1 actor call, 11 pages × 5 posts):            ~$0.281
-  ----------------------------------------------------------
-  Total per run: ~$0.36   |   Weekly: ~$1.44/mo
+  IG profile (1 call, 11 profiles):     ~$0.029
+  IG posts   (1 call, ~55 posts):       ~$0.094
+  X          (1 call, ~110 tweets):     ~$0.028
+  FB pages   (1 call, 11 pages):        ~$0.055
+  FB posts   (1 call, 11 × 5 posts):    ~$0.281
+  ----------------------------------------------------
+  Total per run: ~$0.49  |  Weekly:    ~$1.96/mo
 
 Run from project root::
 
@@ -70,14 +77,20 @@ SCRAPER_NAME = "apify_social"  # MUST match dbName in src/lib/constants.ts SCRAP
 # Actor IDs — keep in sync with src/lib/constants.ts ACTOR_TO_SCRAPER map.
 FB_ACTOR_ID = "apify/facebook-posts-scraper"
 FB_ACTOR_BUILD = "0.0.293"   # verified 2026-05-04 — see APIFY_BUILD_VERIFIED.txt
+FB_PAGES_ACTOR_ID = "apify/facebook-pages-scraper"  # page metadata (followers, likes)
 IG_ACTOR_ID = "apify/instagram-profile-scraper"
+IG_POSTS_ACTOR_ID = "apify/instagram-post-scraper"  # for posts_last_7d
 X_ACTOR_ID  = "kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest"
 
 # Per-actor cost caps. Belt-and-braces against runaway scrolls. Free tier is $5/mo.
-FB_COST_CAP_USD = Decimal("1.00")  # 11 pages × 5 posts measured ~$0.28; cap at 1.00
-IG_COST_CAP_USD = Decimal("0.50")  # 11 profiles measured ~$0.029; generous cap
-X_COST_CAP_USD  = Decimal("0.50")  # 11 batched searchTerms measured ~$0.055
+FB_COST_CAP_USD = Decimal("1.00")  # 11 pages × 5 posts measured ~$0.28
+FB_PAGES_COST_CAP_USD = Decimal("0.30")  # 11 pages metadata measured ~$0.055
+IG_COST_CAP_USD = Decimal("0.50")  # 11 profiles measured ~$0.029
+IG_POSTS_COST_CAP_USD = Decimal("0.50")  # 11 × 5 posts measured ~$0.094
+X_COST_CAP_USD  = Decimal("0.50")  # 11 batched searchTerms × ~10 tweets ~$0.028
 FB_RESULTS_LIMIT_PER_PAGE = 5      # was 50 in Phase 1 — reduced for Phase 2 cost
+IG_POSTS_LIMIT_PER_HANDLE = 5      # enough to compute posts_last_7d
+X_TWEETS_PER_HANDLE = 10           # bumped from 1 — needed for posts_last_7d
 PER_RUN_TIMEOUT_SECS = 900         # 15 min (subprocess gives 30 min outer cap)
 
 DEFAULT_MARKET_CODE = "global"
@@ -100,27 +113,92 @@ def _normalize_slug(s: str | None) -> str:
     return (s or "").lower().strip().lstrip("@").rstrip("/")
 
 
+def _is_x_tweet_within_7d(timestamp: str | int | float | None) -> bool:
+    """X / Twitter tweets carry timestamps in two formats:
+      - legacy Twitter: 'Tue Dec 08 10:40:14 +0000 2009'
+      - ISO 8601: '2026-05-04T17:09:40.274Z'
+    Returns True if timestamp is within 7 days of now."""
+    if not timestamp:
+        return False
+    if isinstance(timestamp, (int, float)):
+        try:
+            ts = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+            return (datetime.now(timezone.utc) - ts).total_seconds() <= 7 * 86400
+        except Exception:
+            return False
+    s = str(timestamp)
+    # Try ISO first
+    if _is_within_7d(s):
+        return True
+    # Try legacy Twitter format
+    try:
+        ts = datetime.strptime(s, "%a %b %d %H:%M:%S %z %Y")
+        return (datetime.now(timezone.utc) - ts).total_seconds() <= 7 * 86400
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
-# Facebook (apify/facebook-posts-scraper)
+# Facebook (apify/facebook-pages-scraper for metadata + posts-scraper for activity)
 # ---------------------------------------------------------------------------
-def _fb_extract_followers(items_for_page: list[dict]) -> int | None:
-    """FB posts-scraper sometimes embeds page metadata on each post; try
-    several known shapes defensively. Returns None when none of the
-    candidates are present or positive (PHASE 2 NOTE: this actor is
-    post-focused; consider apify/facebook-pages-scraper for cleaner page
-    metadata in a future plan)."""
-    for it in items_for_page or []:
-        candidates = [
-            it.get("followers"),
-            (it.get("page") or {}).get("followers"),
-            (it.get("page") or {}).get("followersCount"),
-            it.get("pageFollowers"),
-            it.get("pageLikes"),  # FB pages often expose likes as proxy
-        ]
-        for c in candidates:
-            if isinstance(c, (int, float)) and c > 0:
-                return int(c)
-    return None
+def _fetch_fb_page_metadata(client: ApifyClient, slugs: list[str]) -> dict[str, dict]:
+    """Call apify/facebook-pages-scraper for batched page metadata. Returns
+    {slug_lower: {followers, likes}} keyed by slug. Empty dict on failure
+    (the FB posts scraper still runs and writes a snapshot row with null
+    follower count)."""
+    if not slugs:
+        return {}
+    try:
+        logger.info("FB pages: calling %s for %d pages", FB_PAGES_ACTOR_ID, len(slugs))
+        run = client.actor(FB_PAGES_ACTOR_ID).call(
+            run_input={
+                "startUrls": [{"url": f"https://www.facebook.com/{s}"} for s in slugs],
+            },
+            max_total_charge_usd=FB_PAGES_COST_CAP_USD,
+            timeout_secs=PER_RUN_TIMEOUT_SECS,
+        ) or {}
+        items = list(client.dataset(run.get("defaultDatasetId")).iterate_items())
+        logger.info("FB pages: returned %d items, status=%s", len(items), run.get("status"))
+    except Exception as e:
+        logger.exception("FB pages actor call failed: %s", e)
+        return {}
+
+    out: dict[str, dict] = {}
+    for it in items:
+        url = (it.get("pageUrl") or it.get("url") or it.get("facebookUrl") or "").lower()
+        for s in slugs:
+            sl = s.lower()
+            if f"/{sl}" in url or f"facebook.com/{sl}" in url:
+                followers = it.get("followers") or it.get("followersCount")
+                likes = it.get("likes") or it.get("likesCount")
+                out[sl] = {
+                    "followers": int(followers) if isinstance(followers, (int, float)) and followers > 0 else None,
+                    "likes": int(likes) if isinstance(likes, (int, float)) and likes > 0 else None,
+                }
+                break
+    return out
+
+
+def _fb_compute_engagement(page_items: list[dict], follower_count: int | None) -> float | None:
+    """Average (likes + comments + shares) per post / followers. Returns
+    None if we can't compute (no followers or no posts with engagement)."""
+    if not page_items or not follower_count or follower_count <= 0:
+        return None
+    samples: list[int] = []
+    for post in page_items:
+        likes = post.get("likesCount") or post.get("likes") or 0
+        comments = post.get("commentsCount") or post.get("comments") or 0
+        shares = post.get("sharesCount") or post.get("shares") or 0
+        if isinstance(likes, dict):  # some actors return reaction breakdowns
+            likes = likes.get("total") or sum(v for v in likes.values() if isinstance(v, int))
+        try:
+            samples.append(int(likes) + int(comments) + int(shares))
+        except (TypeError, ValueError):
+            continue
+    if not samples:
+        return None
+    avg_engagement = sum(samples) / len(samples)
+    return round(avg_engagement / follower_count, 6)
 
 
 def _fb_group_by_slug(items: list[dict], slugs: list[str]) -> dict[str, list[dict]]:
@@ -139,7 +217,13 @@ def _fb_group_by_slug(items: list[dict], slugs: list[str]) -> dict[str, list[dic
 
 def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                  targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
-    """Returns (records_written, error_messages)."""
+    """Returns (records_written, error_messages).
+
+    Two batched actor calls per run:
+      1. apify/facebook-pages-scraper → followers + page likes per page
+      2. apify/facebook-posts-scraper → recent posts for posts_last_7d +
+         engagement metrics (likes/comments/shares per post averaged ÷ followers)
+    """
     if not targets:
         return 0, []
     slugs = [t[1] for t in targets]
@@ -150,6 +234,10 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
     items: list[dict] = []
     err_msg: str | None = None
 
+    # Step 1: batched page metadata (followers, likes)
+    pages_meta = _fetch_fb_page_metadata(client, slugs)
+
+    # Step 2: batched recent posts (for posts_last_7d + engagement)
     try:
         logger.info("FB: calling %s for %d pages", FB_ACTOR_ID, len(slugs))
         apify_run_obj = client.actor(FB_ACTOR_ID).call(
@@ -174,14 +262,18 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
         slug_l = slug.lower()
         cid = by_competitor[slug_l]
         page_items = grouped.get(slug_l, [])
-        platform_status = "success" if page_items else "empty"
+        page_meta = pages_meta.get(slug_l, {})
+        # Pages scraper is the authoritative source for followers; fall back
+        # to whatever the posts scraper happened to embed if pages call failed.
+        follower_count = page_meta.get("followers")
+        platform_status = "success" if (page_items or follower_count) else "empty"
 
-        if page_items:
-            follower_count = _fb_extract_followers(page_items)
+        if page_items or follower_count:
             posts_last_7d = sum(
                 1 for it in page_items
                 if _is_within_7d(it.get("time") or it.get("timestamp") or it.get("createdAt"))
             )
+            engagement_rate = _fb_compute_engagement(page_items, follower_count)
             confidence = "high" if (follower_count and posts_last_7d > 0) else "medium"
             try:
                 conn.execute(
@@ -193,11 +285,13 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                     """
                     INSERT INTO social_snapshots
                       (competitor_id, platform, snapshot_date, followers,
-                       posts_last_7d, latest_post_url, market_code, extraction_confidence)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       posts_last_7d, engagement_rate, latest_post_url,
+                       market_code, extraction_confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (cid, "facebook", snapshot_date, follower_count, posts_last_7d,
-                     page_items[0].get("url") or page_items[0].get("postUrl"),
+                     engagement_rate,
+                     (page_items[0].get("url") or page_items[0].get("postUrl")) if page_items else None,
                      DEFAULT_MARKET_CODE, confidence),
                 )
                 written += 1
@@ -247,8 +341,44 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
 
 
 # ---------------------------------------------------------------------------
-# Instagram (apify/instagram-profile-scraper)
+# Instagram (profile scraper for metadata + post scraper for posts_last_7d)
 # ---------------------------------------------------------------------------
+def _fetch_ig_posts_per_handle(client: ApifyClient, handles: list[str]) -> dict[str, int]:
+    """Call apify/instagram-post-scraper for batched recent posts. Returns
+    {handle_lower: posts_last_7d}. Empty dict on failure (snapshot still
+    writes with posts_last_7d=None)."""
+    if not handles:
+        return {}
+    try:
+        logger.info("IG posts: calling %s for %d handles", IG_POSTS_ACTOR_ID, len(handles))
+        run = client.actor(IG_POSTS_ACTOR_ID).call(
+            run_input={
+                "directUrls": [f"https://www.instagram.com/{h}/" for h in handles],
+                "resultsLimit": IG_POSTS_LIMIT_PER_HANDLE,
+            },
+            max_total_charge_usd=IG_POSTS_COST_CAP_USD,
+            timeout_secs=PER_RUN_TIMEOUT_SECS,
+        ) or {}
+        items = list(client.dataset(run.get("defaultDatasetId")).iterate_items())
+        logger.info("IG posts: returned %d items, status=%s", len(items), run.get("status"))
+    except Exception as e:
+        logger.exception("IG posts actor call failed: %s", e)
+        return {}
+
+    counts: dict[str, int] = {}
+    for post in items:
+        owner = post.get("ownerUsername") or post.get("username") or ""
+        h = _normalize_slug(owner)
+        if not h:
+            continue
+        ts = post.get("timestamp") or post.get("takenAtTimestamp") or post.get("createdAt")
+        if isinstance(ts, (int, float)):
+            ts = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+        if _is_within_7d(ts):
+            counts[h] = counts.get(h, 0) + 1
+    return counts
+
+
 def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                   targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
     if not targets:
@@ -261,6 +391,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
     items: list[dict] = []
     err_msg: str | None = None
 
+    # Step 1: batched profile data (followers)
     try:
         logger.info("IG: calling %s for %d handles", IG_ACTOR_ID, len(handles))
         apify_run_obj = client.actor(IG_ACTOR_ID).call(
@@ -275,6 +406,9 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
         errors.append(f"ig_actor_call: {e}")
         logger.exception("IG actor call failed")
 
+    # Step 2: batched recent posts (for posts_last_7d)
+    posts_per_handle = _fetch_ig_posts_per_handle(client, handles)
+
     # Index by username — the actor returns one item per username.
     by_user = {_normalize_slug(it.get("username")): it for it in items if it.get("username")}
 
@@ -285,10 +419,8 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
         if item and isinstance(item.get("followersCount"), int):
             try:
                 followers = item["followersCount"]
-                posts_count = item.get("postsCount") or 0
-                # IG profile actor doesn't return per-post timestamps; use postsCount as
-                # a proxy "has activity" signal. Real posts_last_7d would need a separate call.
-                confidence = "high" if followers > 0 else "medium"
+                posts_last_7d = posts_per_handle.get(h, 0)
+                confidence = "high" if (followers > 0 and posts_last_7d > 0) else "medium"
                 conn.execute(
                     "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
                     "AND market_code=? AND snapshot_date=?",
@@ -301,7 +433,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                        posts_last_7d, latest_post_url, market_code, extraction_confidence)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (cid, "instagram", snapshot_date, followers, None,
+                    (cid, "instagram", snapshot_date, followers, posts_last_7d,
                      f"https://www.instagram.com/{handle}/", DEFAULT_MARKET_CODE, confidence),
                 )
                 written += 1
@@ -368,11 +500,14 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
     err_msg: str | None = None
 
     try:
-        logger.info("X: calling %s for %d handles", X_ACTOR_ID, len(handles))
+        logger.info("X: calling %s for %d handles (×%d tweets each)",
+                    X_ACTOR_ID, len(handles), X_TWEETS_PER_HANDLE)
         apify_run_obj = client.actor(X_ACTOR_ID).call(
             run_input={
                 "searchTerms": [f"from:{h}" for h in handles],
-                "maxItems": len(handles),
+                # bumped from 1: need ~10 tweets per handle to count posts_last_7d.
+                # actor minimum batch is 20/searchTerm so we get plenty either way.
+                "maxItems": len(handles) * X_TWEETS_PER_HANDLE,
             },
             max_total_charge_usd=X_COST_CAP_USD,
             timeout_secs=PER_RUN_TIMEOUT_SECS,
@@ -384,8 +519,10 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
         errors.append(f"x_actor_call: {e}")
         logger.exception("X actor call failed")
 
-    # Tweets carry the author object; index by author.userName. Skip mocks.
+    # Tweets carry the author object. Index FIRST tweet per user as the
+    # author-info source; also count tweets per user inside 7-day window.
     by_user: dict[str, dict] = {}
+    posts_last_7d_per_user: dict[str, int] = {}
     mock_count = 0
     for tweet in items:
         if tweet.get("type") == "mock_tweet":
@@ -393,8 +530,16 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
             continue
         author = tweet.get("author") or {}
         u = _normalize_slug(author.get("userName"))
-        if u and u not in by_user:
+        if not u:
+            continue
+        if u not in by_user:
             by_user[u] = author
+        # Count this tweet against posts_last_7d if its createdAt is within 7d.
+        # createdAt format: "Tue Dec 08 10:40:14 +0000 2009" (legacy Twitter)
+        # or ISO. Try both.
+        created = tweet.get("createdAt") or tweet.get("created_at")
+        if _is_x_tweet_within_7d(created):
+            posts_last_7d_per_user[u] = posts_last_7d_per_user.get(u, 0) + 1
     if mock_count:
         logger.warning("X: %d mock placeholders (handles that 404'd) — billed but ignored", mock_count)
 
@@ -405,8 +550,8 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
         if author and isinstance(author.get("followers"), int):
             try:
                 followers = author["followers"]
-                statuses = author.get("statusesCount") or 0
-                confidence = "high" if followers > 0 else "medium"
+                posts_last_7d = posts_last_7d_per_user.get(h, 0)
+                confidence = "high" if (followers > 0 and posts_last_7d > 0) else "medium"
                 conn.execute(
                     "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
                     "AND market_code=? AND snapshot_date=?",
@@ -419,7 +564,7 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                        posts_last_7d, latest_post_url, market_code, extraction_confidence)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (cid, "x", snapshot_date, followers, None,
+                    (cid, "x", snapshot_date, followers, posts_last_7d,
                      f"https://x.com/{handle}", DEFAULT_MARKET_CODE, confidence),
                 )
                 written += 1
