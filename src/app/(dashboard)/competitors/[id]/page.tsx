@@ -81,6 +81,13 @@ export default async function CompetitorDetailPage({
 
   if (!competitor) notFound();
 
+  // Compute time-window cutoffs ONCE at the top of the request so React 19's
+  // purity lint (react-hooks/purity) doesn't flag impure Date.now() calls
+  // inside the Drizzle query expressions below.
+  const now = Date.now();
+  const sevenDaysAgoIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const thirtyDaysAgoDate = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   // Fetch all data in parallel
   const [
     latestInsight,
@@ -183,7 +190,7 @@ export default async function CompetitorDetailPage({
         and(
           eq(changeEvents.competitorId, id),
           eq(changeEvents.fieldName, "scraper_zero_results"),
-          gte(changeEvents.detectedAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+          gte(changeEvents.detectedAt, sevenDaysAgoIso),
         ),
       ),
 
@@ -195,7 +202,7 @@ export default async function CompetitorDetailPage({
       .select()
       .from(socialSnapshots)
       .where(
-        gte(socialSnapshots.snapshotDate, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
+        gte(socialSnapshots.snapshotDate, thirtyDaysAgoDate),
       )
       .orderBy(desc(socialSnapshots.id)),
 
