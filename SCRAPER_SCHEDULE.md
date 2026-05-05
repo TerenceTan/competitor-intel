@@ -3,7 +3,7 @@
 ## Overview
 
 9 scrapers run on independent schedules based on how frequently the underlying data changes.
-All times are **UTC**. Run from the project root (`/home/ubuntu/app`).
+All times are **SGT (Asia/Singapore, UTC+8)** so morning runs land before the marketing team's working day. Run from the project root (`/home/ubuntu/app`).
 
 **Cron entries route through `run_all.py <script>` (single-script mode)** so the
 INFRA-02 timeout guard and INFRA-04 healthcheck ping (Plan 01-04) both fire,
@@ -41,28 +41,28 @@ SSH into the server and run `crontab -e`, then add:
 #                    INFRA-04 HC.io ping; HEALTHCHECK_URL_<NAME> env vars must
 #                    be present in .env.local for pings to fire.
 
-TZ=UTC
+TZ=Asia/Singapore
 APP=/home/ubuntu/app
 PY=$APP/.venv/bin/python
 
-# News — every 6 hours
+# News — every 6 hours (00 / 06 / 12 / 18 SGT)
 0 */6 * * * cd $APP && $PY scrapers/run_all.py news_scraper.py >> logs/news_scraper.log 2>&1
 
-# Reputation — every 3 days at 7am UTC
+# Reputation — every 3 days at 7am SGT
 0 7 */3 * * cd $APP && $PY scrapers/run_all.py reputation_scraper.py >> logs/reputation_scraper.log 2>&1
 
-# AI analysis — daily at 8am UTC (after reputation is done)
+# AI analysis — daily at 8am SGT (after reputation is done)
 0 8 * * * cd $APP && $PY scrapers/run_all.py ai_analyzer.py >> logs/ai_analyzer.log 2>&1
 
-# Promos — every 2 days at 8am UTC
+# Promos — every 2 days at 8am SGT
 0 8 */2 * * cd $APP && $PY scrapers/run_all.py promo_scraper.py >> logs/promo_scraper.log 2>&1
 
-# Pricing + AccountTypes + WikiFX — weekly, Monday 6am UTC
+# Pricing + AccountTypes + WikiFX — weekly, Monday 6am SGT
 0 6 * * 1 cd $APP && $PY scrapers/run_all.py pricing_scraper.py >> logs/pricing_scraper.log 2>&1
 0 6 * * 1 cd $APP && $PY scrapers/run_all.py account_types_scraper.py >> logs/account_types_scraper.log 2>&1
 0 6 * * 1 cd $APP && $PY scrapers/run_all.py wikifx_scraper.py >> logs/wikifx_scraper.log 2>&1
 
-# Social (legacy IG/X/YT) + Apify FB — weekly, Monday 7am UTC (after pricing/wikifx)
+# Social (legacy YT-only) + Apify FB/IG/X — weekly, Monday 7am SGT (after pricing/wikifx)
 0 7 * * 1 cd $APP && $PY scrapers/run_all.py social_scraper.py >> logs/social_scraper.log 2>&1
 0 7 * * 1 cd $APP && $PY scrapers/run_all.py apify_social.py   >> logs/apify_social.log 2>&1
 ```

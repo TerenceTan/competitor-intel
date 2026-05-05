@@ -1,4 +1,4 @@
-TZ=UTC
+TZ=Asia/Singapore
 0 */6 * * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py news_scraper.py >> logs/news_scraper.log 2>&1
 0 7 */3 * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py reputation_scraper.py >> logs/reputation_scraper.log 2>&1
 0 8 * * * cd /home/ubuntu/app && /home/ubuntu/app/.venv/bin/python scrapers/run_all.py ai_analyzer.py >> logs/ai_analyzer.log 2>&1
