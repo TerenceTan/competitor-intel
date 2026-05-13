@@ -124,7 +124,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Apify + Scaffolding + Trust Schema | 6/6 | Complete (operator follow-ups outstanding before Phase 2 EC2 deploy) | 2026-05-04 |
-| 2. Per-Market Social Fanout (8 APAC Markets) | 0/5 | Not started | - |
+| 2. Per-Market Social Fanout (8 APAC Markets) | 5/5 | Code complete; operator follow-up for 2-market Apify smoke (APIFY_MARKET_FANOUT_SMOKE_PENDING.txt) | 2026-05-14 |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |
 | 5. Confidence & Freshness UX Polish | 0/TBD | Not started | - |
