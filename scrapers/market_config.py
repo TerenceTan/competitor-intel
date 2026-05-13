@@ -6,36 +6,85 @@ Two scraping methods per competitor-market pair:
 - "geo_proxy" — ScraperAPI with country_code param on the global URL (5-10 credits)
 
 Most brokers use URL-path routing, so the majority of requests cost 0 credits.
+
+Phase 2 (per CONTEXT.md D2-01 / RESEARCH.md Pattern 3): also exposes the canonical
+APAC v1 market list and the APIFY_MARKETS_ENABLED env-var parser used by
+scrapers/apify_social.py.
 """
 
+import logging
 from typing import Optional
 
-PRIORITY_MARKETS = ["sg", "my", "th", "vn", "id", "hk", "tw", "cn", "mn"]
+# Canonical APAC v1 market list — single source of truth on the scraper side.
+# MUST stay in sync with src/lib/markets.ts PRIORITY_MARKETS (corrected in Plan 02-01).
+# Used by scrapers/apify_social.py per CONTEXT.md D2-01 and RESEARCH.md Pattern 3.
+APAC_V1_MARKETS: list[str] = ["sg", "hk", "tw", "my", "th", "ph", "id", "vn"]
+
+
+def parse_target_markets(env_value: Optional[str]) -> list[str]:
+    """Parse the APIFY_MARKETS_ENABLED env var into a list of target market codes.
+
+    - Empty / unset -> ['global'] (free-tier-safe default; preserves Phase 1 behavior).
+    - Comma-separated codes -> validated list (whitespace trimmed, lowercased,
+      unknown codes silently dropped with a warning so a typo doesn't burn budget).
+    - 'global' is always a valid code (means: no apifyProxyCountry on the actor call).
+
+    Examples:
+        parse_target_markets(None)         -> ['global']
+        parse_target_markets("")           -> ['global']
+        parse_target_markets("  ")         -> ['global']
+        parse_target_markets("sg")         -> ['sg']
+        parse_target_markets("sg,my")      -> ['sg', 'my']
+        parse_target_markets("SG, MY ")    -> ['sg', 'my']
+        parse_target_markets("sg,xx,my")   -> ['sg', 'my']   # xx dropped + warned
+        parse_target_markets("global,sg")  -> ['global', 'sg']
+    """
+    if not env_value or not env_value.strip():
+        return ["global"]
+    raw = [tok.strip().lower() for tok in env_value.split(",")]
+    out: list[str] = []
+    valid = set(APAC_V1_MARKETS) | {"global"}
+    for tok in raw:
+        if not tok:
+            continue
+        if tok not in valid:
+            logging.getLogger(__name__).warning(
+                "parse_target_markets: dropping unknown market code %r (valid: %s)",
+                tok, sorted(valid),
+            )
+            continue
+        out.append(tok)
+    return out or ["global"]
+
+
+# Legacy ScraperAPI priority list. Phase 2 reconciles this with APAC_V1_MARKETS:
+# the prior list contained sg/my/th/vn/id/hk/tw plus China + Mongolia which are
+# out of scope per ROADMAP Out-of-Scope table, and the Philippines code (ph) was
+# missing. Other modules still import this symbol; do not delete.
+PRIORITY_MARKETS = list(APAC_V1_MARKETS)
 
 # Human-readable names for dashboard display
 MARKET_NAMES = {
     "sg": "Singapore",
-    "my": "Malaysia",
-    "th": "Thailand",
-    "vn": "Vietnam",
-    "id": "Indonesia",
     "hk": "Hong Kong",
     "tw": "Taiwan",
-    "cn": "China",
-    "mn": "Mongolia",
+    "my": "Malaysia",
+    "th": "Thailand",
+    "ph": "Philippines",
+    "id": "Indonesia",
+    "vn": "Vietnam",
 }
 
 # ScraperAPI country_code mapping (ISO 3166-1 alpha-2)
 SCRAPERAPI_COUNTRY_CODES = {
     "sg": "sg",
-    "my": "my",
-    "th": "th",
-    "vn": "vn",
-    "id": "id",
     "hk": "hk",
     "tw": "tw",
-    "cn": "cn",
-    "mn": "mn",
+    "my": "my",
+    "th": "th",
+    "ph": "ph",
+    "id": "id",
+    "vn": "vn",
 }
 
 # ---------------------------------------------------------------------------
@@ -84,13 +133,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
             "method": "url",
             "pricing_url": "https://www.icmarkets.com/global/tw/trading-accounts/overview",
         },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.icmarkets.com/global/cn/trading-accounts/overview",
-        },
-        "mn": {
-            "method": "geo_proxy",
-        },
     },
 
     # Exness: /{lang}/ path routing on main domain
@@ -122,13 +164,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
         "tw": {
             "method": "url",
             "pricing_url": "https://www.exness.com/zh-hant/accounts/",
-        },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.exness.com/zh-hans/accounts/",
-        },
-        "mn": {
-            "method": "geo_proxy",
         },
     },
 
@@ -162,13 +197,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
             "method": "url",
             "pricing_url": "https://www.vantagemarkets.com/zh-hant/trading/accounts/",
         },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.vantagemarkets.com/zh-hans/trading/accounts/",
-        },
-        "mn": {
-            "method": "geo_proxy",
-        },
     },
 
     # XM Group: /{lang}/ path routing
@@ -200,13 +228,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
         "tw": {
             "method": "url",
             "pricing_url": "https://www.xm.com/tw/account-types",
-        },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.xm.com/cn/account-types",
-        },
-        "mn": {
-            "method": "geo_proxy",
         },
     },
 
@@ -240,13 +261,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
             "method": "url",
             "pricing_url": "https://www.hfm.com/int/tw/trading/account-types/",
         },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.hfm.com/int/cn/trading/account-types/",
-        },
-        "mn": {
-            "method": "geo_proxy",
-        },
     },
 
     # FBS: /{lang}/ path routing — /vi/ and /zh/ return 404, use geo_proxy
@@ -275,12 +289,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
         },
         "tw": {
             "method": "geo_proxy",  # /zh/ returns 404
-        },
-        "cn": {
-            "method": "geo_proxy",  # /zh/ returns 404
-        },
-        "mn": {
-            "method": "geo_proxy",
         },
     },
 
@@ -314,13 +322,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
             "method": "url",
             "pricing_url": "https://www.iux.com/zh/trading-accounts",
         },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.iux.com/zh/trading-accounts",
-        },
-        "mn": {
-            "method": "geo_proxy",
-        },
     },
 
     # FxPro: uses separate regional domains for some APAC markets, not path-based
@@ -348,12 +349,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
         },
         "tw": {
             "method": "geo_proxy",  # unverified path
-        },
-        "cn": {
-            "method": "geo_proxy",  # unverified path
-        },
-        "mn": {
-            "method": "geo_proxy",
         },
     },
 
@@ -388,13 +383,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
             "method": "url",
             "pricing_url": "https://www.mitrade.com/zh/trading-accounts",
         },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.mitrade.com/cn/trading-accounts",
-        },
-        "mn": {
-            "method": "geo_proxy",
-        },
     },
 
     # TMGM: /en/ path — /th/ and /id/ verified, /vi/ and /ms/ return English content
@@ -424,13 +412,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
         "tw": {
             "method": "url",
             "pricing_url": "https://www.tmgm.com/zh-hant/trading/account-types",
-        },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://www.tmgm.com/zh-hans/trading/account-types",
-        },
-        "mn": {
-            "method": "geo_proxy",
         },
     },
 
@@ -464,14 +445,6 @@ MARKET_URLS: dict[str, dict[str, dict]] = {
         "tw": {
             "method": "url",
             "pricing_url": "https://pepperstone.com/zht/ways-to-trade/trading-accounts/",
-        },
-        "cn": {
-            "method": "url",
-            "pricing_url": "https://pepperstone.com/zh-cn/ways-to-trade/trading-accounts/",
-        },
-        "mn": {
-            "method": "url",
-            "pricing_url": "https://pepperstone.com/mn-mn/ways-to-trade/trading-accounts/",
         },
     },
 }
