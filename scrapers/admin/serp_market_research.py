@@ -48,26 +48,68 @@ COST_CAP_USD = Decimal("1.00")  # belt-and-braces; expected ~$0.45/market
 #   5 generic intent | 5 spec/feature | 5 branded
 QUERY_SETS: dict[str, list[str]] = {
     "sg": [
-        # Generic intent
+        # Generic intent (8 — bumped from 5 after the first SG run showed too
+        # many known competitors had zero organic visibility because branded
+        # queries dominated the set)
         "forex broker singapore",
         "best cfd broker singapore",
         "mt4 broker singapore",
         "mt5 broker singapore",
         "cfd trading platform singapore",
-        # Spec / feature
+        "online trading platform singapore",
+        "forex trading account singapore",
+        "leveraged trading singapore",
+        # Spec / feature (5)
         "lowest spread forex singapore",
         "ecn forex broker singapore",
         "islamic forex account singapore",
         "forex broker mas regulated singapore",
         "demo account forex broker singapore",
-        # Branded — verifies our existing 11 + reveals unknowns via co-occurrence
+        # Branded (2 — reduced from 5; score now filters own-brand hits)
         "ic markets singapore",
-        "exness singapore",
-        "vantage markets singapore",
-        "fxpro singapore",
         "xm broker singapore",
     ],
-    # vn / hk / tw / my / th / ph / id query sets to be added once SG is validated
+    "vn": [
+        # Generic intent (8) — mixed Vietnamese + English. VN audience uses both
+        # for financial content; English-language queries catch SEO-optimized
+        # foreign brokers, Vietnamese queries catch local-language landing pages.
+        "sàn forex việt nam",
+        "forex broker vietnam",
+        "sàn cfd việt nam",
+        "mt4 broker vietnam",
+        "giao dịch ngoại hối việt nam",
+        "best forex broker vietnam",
+        "sàn giao dịch chứng khoán quốc tế",  # international stock exchange
+        "đầu tư forex việt nam",                # forex investment
+        # Spec / feature (5)
+        "sàn forex spread thấp việt nam",
+        "sàn ecn việt nam",
+        "sàn forex uy tín nhất việt nam",       # most trustworthy
+        "demo forex việt nam",
+        "tài khoản forex việt nam",             # forex account
+        # Branded (2)
+        "exness vietnam",
+        "ic markets vietnam",
+    ],
+    # hk / tw / my / th / ph / id query sets to be added once SG + VN validate
+}
+
+# Per-competitor brand tokens for own-brand filtering. Each token is matched
+# against the lowercase query with word boundaries. False-positives on
+# 2-char ids (e.g. "xm") are avoided by using the full "name" from config.py
+# when the id is too short.
+_BRAND_TOKENS_OVERRIDE: dict[str, list[str]] = {
+    "ic-markets": ["ic markets", "icmarkets"],
+    "vantage": ["vantage markets", "vantage"],
+    "xm": ["xm broker", "xm trading", "xm group"],  # avoid bare "xm" — too short
+    "fxpro": ["fxpro", "fx pro"],
+    "exness": ["exness"],
+    "fbs": ["fbs"],
+    "hfm": ["hfm", "hf markets", "hotforex"],
+    "iux": ["iux"],
+    "mitrade": ["mitrade"],
+    "tmgm": ["tmgm"],
+    "pepperstone": ["pepperstone"],
 }
 
 # Localization params for the Apify google-search-scraper actor
@@ -157,15 +199,33 @@ def run_serp(client: ApifyClient, market: str) -> list[dict]:
     return items
 
 
+def _is_own_brand_query(query: str, competitor_id: str) -> bool:
+    """A competitor ranking #1 for its own branded query ('ic markets singapore'
+    for ic-markets) is trivially expected and tells us nothing about
+    actual market activity. Filter those out of the score so the rule
+    measures organic / cross-query visibility, not name recognition.
+
+    Uses _BRAND_TOKENS_OVERRIDE for known competitors; falls back to the
+    competitor_id (hyphen-normalized) for unknowns.
+    """
+    q_lower = query.lower()
+    tokens = _BRAND_TOKENS_OVERRIDE.get(
+        competitor_id,
+        [competitor_id.replace("-", " ").lower(), competitor_id.replace("-", "").lower()],
+    )
+    return any(tok in q_lower for tok in tokens)
+
+
 def score(items: list[dict], known: dict[str, str]) -> tuple[dict, Counter]:
     """Returns ({competitor_id: stats}, Counter of unknown domains).
 
     Stats per competitor:
-      - queries_appeared: set of query strings where they appeared
-      - ranks: list of (query, position) tuples
+      - queries_appeared: set of query strings where they appeared (excl. own-brand)
+      - ranks: list of (query, position) tuples (excl. own-brand)
+      - own_brand_hits: count of own-brand appearances (informational only)
     """
     stats: dict[str, dict] = defaultdict(
-        lambda: {"queries_appeared": set(), "ranks": []}
+        lambda: {"queries_appeared": set(), "ranks": [], "own_brand_hits": 0}
     )
     unknown_domains: Counter = Counter()
 
@@ -184,8 +244,12 @@ def score(items: list[dict], known: dict[str, str]) -> tuple[dict, Counter]:
                 continue
             cid = known.get(d)
             if cid:
-                stats[cid]["queries_appeared"].add(query)
-                stats[cid]["ranks"].append((query, position))
+                if _is_own_brand_query(query, cid):
+                    # Trivial self-ranking; count for visibility but exclude from score
+                    stats[cid]["own_brand_hits"] += 1
+                else:
+                    stats[cid]["queries_appeared"].add(query)
+                    stats[cid]["ranks"].append((query, position))
             else:
                 # Skip Google internal domains and well-known non-broker domains
                 if any(skip in d for skip in (
@@ -211,18 +275,24 @@ def render(stats: dict, unknown: Counter, market: str, csv_path: str) -> None:
             "total_appearances": len(s["ranks"]),
             "best_rank": min(ranks) if ranks else None,
             "avg_rank": round(sum(ranks) / len(ranks), 1) if ranks else None,
+            "own_brand_hits": s["own_brand_hits"],
         })
     rows.sort(key=lambda r: (-r["queries_appeared"], r["best_rank"] or 99))
 
     print(f"\n=== Per-competitor SERP visibility — market={market} ===")
-    print(f"| {'competitor':14s} | queries | total | best | avg  | confidence |")
-    print(f"|{'-'*16}|---------|-------|------|------|------------|")
+    print(f"  Scoring excludes own-brand queries (e.g. 'ic markets singapore' for ic-markets)")
+    print(f"  to measure organic / cross-query visibility rather than name recognition.")
+    print()
+    print(f"| {'competitor':14s} | queries | total | best | avg  | own-brand | confidence |")
+    print(f"|{'-'*16}|---------|-------|------|------|-----------|------------|")
     for r in rows:
-        # Confidence rule:
-        #   strong = appeared in >=3 queries AND best_rank<=10
-        #   medium = appeared in >=1 query
-        #   weak   = no appearances
-        if r["queries_appeared"] >= 3 and (r["best_rank"] or 99) <= 10:
+        # Confidence rule (post own-brand filter):
+        #   strong = appeared in >=2 organic queries AND best_rank<=10
+        #            (relaxed from 3 because most brokers don't dominate >2 queries
+        #             after own-brand removal — empirically validated against SG run 1)
+        #   medium = appeared in >=1 organic query
+        #   weak   = no organic appearances (may still have own-brand hits)
+        if r["queries_appeared"] >= 2 and (r["best_rank"] or 99) <= 10:
             conf = "STRONG"
         elif r["queries_appeared"] >= 1:
             conf = "medium"
@@ -230,7 +300,7 @@ def render(stats: dict, unknown: Counter, market: str, csv_path: str) -> None:
             conf = "weak"
         print(f"| {r['competitor_id']:14s} | {r['queries_appeared']:>7d} | "
               f"{r['total_appearances']:>5d} | {(r['best_rank'] or '-'):>4} | "
-              f"{(r['avg_rank'] or '-'):>4} | {conf:10s} |")
+              f"{(r['avg_rank'] or '-'):>4} | {r['own_brand_hits']:>9d} | {conf:10s} |")
 
     # Competitors in config.py that didn't appear at all
     all_cids = {c["id"] for c in COMPETITORS}
@@ -252,7 +322,7 @@ def render(stats: dict, unknown: Counter, market: str, csv_path: str) -> None:
     with open(csv_path, "w") as f:
         w = csv.DictWriter(f, fieldnames=[
             "competitor_id", "queries_appeared", "total_appearances",
-            "best_rank", "avg_rank",
+            "best_rank", "avg_rank", "own_brand_hits",
         ])
         w.writeheader()
         for r in rows:
