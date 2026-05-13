@@ -1,0 +1,92 @@
+apify_social per-market fanout — operator smoke pending as of 2026-05-13
+
+STATUS: code-side complete (Plan 02-03 merged); 2-market live smoke deferred
+        to operator. Default behavior is Phase-1-equivalent ['global'] until
+        APIFY_MARKETS_ENABLED is set.
+
+WHAT IS SAFE TO MERGE TODAY
+- scrapers/apify_social.py refactored to thread market_code through every
+  actor call (5 sites: FB pages, FB posts, IG profile, IG posts, X) plus
+  every social_snapshots / change_events / apify_run_logs INSERT.
+- TARGET_MARKETS defaults to ['global'] when APIFY_MARKETS_ENABLED is unset
+  or empty (free-tier-safe; preserves exact Phase 1 weekly cost of ~$0.49/run).
+- 21 stdlib-unittest tests green locally (15 from plan 02-02 + 6 new in
+  plan 02-03 — TestProxyConfig + TestRunFacebookMarketLoop).
+
+WHY THE LIVE SMOKE IS DEFERRED
+The Plan 02-03 checkpoint:human-verify gate requires operator action that
+cannot be performed by an autonomous agent:
+
+1. UPGRADE APIFY ACCOUNT to Starter tier ($49/mo)
+   - Per CONTEXT.md D2-08 / STATE.md cost ceiling concern.
+   - Free tier ($5/mo) cannot support 8-market fanout (~$15.7/mo projected).
+   - For the 2-market smoke (sg+my) the free tier might absorb it
+     (~$0.10-0.20 incremental on top of weekly ~$0.49), but the smoke is
+     a precursor to the 8-market production fanout and the Starter upgrade
+     must land first per the locked decision.
+   - Console: https://console.apify.com → Billing → Plans → Starter ($49/mo)
+   - Confirm monthly spending cap raised back to $100 in
+     Console → Settings → Usage limits → Monthly usage limit (D-06).
+
+2. SET ENV VAR ON EC2
+   - SSH to EC2, edit /home/ubuntu/app/.env.local, add ONE of:
+     - 2-market smoke (recommended first step):
+         APIFY_MARKETS_ENABLED="sg,my"
+     - Full 8-market production (post-smoke):
+         APIFY_MARKETS_ENABLED="sg,hk,tw,my,th,ph,id,vn"
+
+3. TRIGGER ONE MANUAL RUN
+   - cd /home/ubuntu/app && python3 scrapers/apify_social.py 2>&1 | tail -40
+   - Verify log shows TARGET_MARKETS=['sg','my'] near the top and
+     '=== Market: sg ===' followed later by '=== Market: my ==='.
+
+4. CONFIRM DB EXPECTATIONS
+   - sqlite3 data/competitor-intel.db
+     > SELECT DISTINCT market_code FROM apify_run_logs
+       WHERE scraper_run_id = (SELECT MAX(id) FROM scraper_runs
+                                WHERE scraper_name='apify_social');
+       Expected: two rows 'sg' and 'my' (Pitfall 5 trap — anything else
+       means market_code default kicked in instead of the loop var).
+     > SELECT platform, market_code, COUNT(*) FROM social_snapshots
+       WHERE snapshot_date = date('now') AND market_code IN ('sg','my')
+       GROUP BY platform, market_code;
+       Expected: rows for facebook / instagram / x × sg / my (some may
+       be missing if a competitor lacks per-market presence — that's the
+       fallback path tested in plans 02-04 and 02-05; not a failure).
+   - /admin/data-health Apify monthly cost panel should not jump alarmingly
+     (2-market smoke should be ~$0.10-0.20 incremental).
+
+5. IF SMOKE PASSES — ENABLE FULL FANOUT
+   - Edit .env.local: APIFY_MARKETS_ENABLED="sg,hk,tw,my,th,ph,id,vn"
+   - Wait for next Mon 7am SGT cron tick, or trigger one manual run.
+   - Confirm 8 distinct market_codes in apify_run_logs.
+
+ASSUMPTIONS TO WATCH FOR (per RESEARCH.md §1 + Assumptions Log)
+- A1: kaitoeasyapi X actor honors top-level proxyConfiguration. If X rows
+      across markets look identical, that's the assumption failing —
+      escalate to residential proxy on X only, or accept geo-routing
+      doesn't differentiate X.
+- A2: All 8 APAC codes are valid Apify datacenter exit countries. If a
+      specific market returns apify_run_logs.status='failed' with a proxy
+      error, swap that market to residential proxy in _proxy_config.
+
+ROLL-BACK PROCEDURE
+If the smoke shows runaway cost OR a per-market actor error storms the run:
+- Unset / clear APIFY_MARKETS_ENABLED on EC2 .env.local → next run reverts
+  to ['global'] (Phase 1 behavior). No code revert needed.
+- Long-term roll-back: git revert the three feat commits from Plan 02-03
+  on a feature branch (Task 1 6a92705, Task 2 228c431, Task 3 5d6400c) —
+  test commit 69053df can stay, the tests are non-functional once the
+  loop is gone.
+
+PHASE 2 DOWNSTREAM PLANS (BLOCKING vs NON-BLOCKING)
+- Plan 02-04 (Digital Presence section on /markets/[code]) does NOT require
+  the live smoke to pass first — the queries already handle the
+  market='global' fallback (D2-10) and will gracefully degrade to global
+  rows until the operator flips the flag.
+- Plan 02-05 (admin/data-health zero-result-by-market breakout) similarly
+  doesn't block on this; it works correctly with or without per-market
+  rows in apify_run_logs.
+
+This marker file should be deleted once the operator confirms the
+2-market smoke succeeded and the production 8-market fanout is enabled.
