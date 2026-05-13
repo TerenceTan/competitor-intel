@@ -260,6 +260,92 @@ export default async function MarketDetailPage({
   const marketAccountMap = new Map(marketAccountRows.map((a) => [a.competitorId, a]));
   const globalAccountMap = new Map(globalAccountRows.map((a) => [a.competitorId, a]));
 
+  // === Phase 2: Social fanout fallback resolution (RESEARCH.md Pattern 4 / D2-10) ===
+  type SocialPlatform = "facebook" | "instagram" | "x";
+  type SocialCell = {
+    followers: number | null;
+    postsLast7d: number | null;
+    isMarketSpecific: boolean;
+  };
+  type SocialKey = `${string}|${SocialPlatform}`;
+
+  const socialMap = new Map<SocialKey, SocialCell>();
+
+  // Pass 1: market-specific rows take precedence.
+  for (const snap of marketSocialRows) {
+    const platform = snap.platform as SocialPlatform;
+    if (platform !== "facebook" && platform !== "instagram" && platform !== "x") continue;
+    const k: SocialKey = `${snap.competitorId}|${platform}`;
+    if (!socialMap.has(k)) {
+      socialMap.set(k, {
+        followers: snap.followers,
+        postsLast7d: snap.postsLast7d,
+        isMarketSpecific: true,
+      });
+    }
+  }
+
+  // Pass 2: global fallback — only fill keys NOT already set.
+  for (const snap of globalSocialRows) {
+    const platform = snap.platform as SocialPlatform;
+    if (platform !== "facebook" && platform !== "instagram" && platform !== "x") continue;
+    const k: SocialKey = `${snap.competitorId}|${platform}`;
+    if (!socialMap.has(k)) {
+      socialMap.set(k, {
+        followers: snap.followers,
+        postsLast7d: snap.postsLast7d,
+        isMarketSpecific: false,
+      });
+    }
+  }
+
+  // Per-(competitor, platform) zero-result lookup: a Set of "competitorId|platform"
+  // keys for which a scraper_zero_results event was logged for the CURRENT marketCode
+  // in the last 7 days. Used to render the inline "scraper failed" indicator.
+  const zeroResultKeys = new Set<SocialKey>();
+  for (const ev of socialZeroResultRows) {
+    // domain shape: 'social_facebook' / 'social_instagram' / 'social_x' (per apify_social.py)
+    const platform = ev.domain.replace(/^social_/, "") as SocialPlatform;
+    if (platform !== "facebook" && platform !== "instagram" && platform !== "x") continue;
+    zeroResultKeys.add(`${ev.competitorId}|${platform}`);
+  }
+
+  // Build the table rows: filter to competitors that have ANY data at all
+  // (snapshot in either pass OR a recent zero-result event on any platform).
+  const socialRows = allCompetitors
+    .map((c) => {
+      const cells: Record<SocialPlatform, SocialCell | "scraper-failed" | null> = {
+        facebook: null,
+        instagram: null,
+        x: null,
+      };
+      let hasAnyData = false;
+      let anyMarketSpecific = false;
+      for (const platform of ["facebook", "instagram", "x"] as const) {
+        const k: SocialKey = `${c.id}|${platform}`;
+        const cell = socialMap.get(k);
+        if (cell) {
+          cells[platform] = cell;
+          hasAnyData = true;
+          if (cell.isMarketSpecific) anyMarketSpecific = true;
+        } else if (zeroResultKeys.has(k)) {
+          cells[platform] = "scraper-failed";
+          hasAnyData = true;
+        }
+      }
+      return { competitor: c, cells, hasAnyData, anyMarketSpecific };
+    })
+    .filter((r) => r.hasAnyData);
+
+  // Sort: self first, then competitors with any market-specific cell, then tier.
+  socialRows.sort((a, b) => {
+    const selfA = a.competitor.isSelf ? 1 : 0;
+    const selfB = b.competitor.isSelf ? 1 : 0;
+    if (selfA !== selfB) return selfB - selfA;
+    if (a.anyMarketSpecific !== b.anyMarketSpecific) return a.anyMarketSpecific ? -1 : 1;
+    return a.competitor.tier - b.competitor.tier;
+  });
+
   // Merge pricing: market-specific takes priority, fallback to global
   const pricingData = allCompetitors.map((c) => {
     const marketSnap = marketPricingMap.get(c.id);
