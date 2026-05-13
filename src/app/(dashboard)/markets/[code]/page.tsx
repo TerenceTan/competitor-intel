@@ -6,8 +6,9 @@ import {
   promoSnapshots,
   accountTypeSnapshots,
   changeEvents,
+  socialSnapshots,
 } from "@/db/schema";
-import { eq, sql, desc, and, gte } from "drizzle-orm";
+import { eq, sql, desc, and, gte, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
@@ -155,6 +156,9 @@ export default async function MarketDetailPage({
     marketAccountRows,
     globalAccountRows,
     recentMarketChanges,
+    marketSocialRows,
+    globalSocialRows,
+    socialZeroResultRows,
   ] = await Promise.all([
     db
       .select()
@@ -204,6 +208,50 @@ export default async function MarketDetailPage({
       )
       .orderBy(desc(changeEvents.detectedAt))
       .limit(10),
+    // Phase 2 — Digital Presence: latest market-specific social snapshot per (competitor, platform)
+    // for FB/IG/X only. Mirrors the MAX(id) GROUP BY pattern used for pricing/promos/accounts above.
+    db
+      .select()
+      .from(socialSnapshots)
+      .where(
+        sql`${socialSnapshots.marketCode} = ${marketCode}
+            AND ${socialSnapshots.platform} IN ('facebook','instagram','x')
+            AND ${socialSnapshots.id} IN (
+              SELECT MAX(id) FROM social_snapshots
+              WHERE market_code = ${marketCode}
+                AND platform IN ('facebook','instagram','x')
+              GROUP BY competitor_id, platform
+            )`
+      ),
+    // Phase 2 — Digital Presence: global fallback pool (RESEARCH.md Pattern 4 / D2-10).
+    db
+      .select()
+      .from(socialSnapshots)
+      .where(
+        sql`${socialSnapshots.marketCode} = 'global'
+            AND ${socialSnapshots.platform} IN ('facebook','instagram','x')
+            AND ${socialSnapshots.id} IN (
+              SELECT MAX(id) FROM social_snapshots
+              WHERE market_code = 'global'
+                AND platform IN ('facebook','instagram','x')
+              GROUP BY competitor_id, platform
+            )`
+      ),
+    // Phase 2 — Digital Presence: scraper_zero_results within last 7 days for FB/IG/X on THIS
+    // market. Used to render the inline "scraper failed" indicator (D2-14 / TRUST-04 carry-forward).
+    db
+      .select()
+      .from(changeEvents)
+      .where(
+        and(
+          eq(changeEvents.fieldName, "scraper_zero_results"),
+          eq(changeEvents.marketCode, marketCode),
+          gte(changeEvents.detectedAt, weekAgo),
+          inArray(changeEvents.domain, ["social_facebook", "social_instagram", "social_x"])
+        )
+      )
+      .orderBy(desc(changeEvents.detectedAt))
+      .limit(500),
   ]);
 
   // Build lookup maps
