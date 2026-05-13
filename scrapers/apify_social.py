@@ -67,6 +67,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message
 from apify_client import ApifyClient  # noqa: E402
 from config import COMPETITORS  # noqa: E402
 from db_utils import get_db, log_scraper_run, update_scraper_run  # noqa: E402
+from market_config import parse_target_markets  # noqa: E402  (Plan 02-02)
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +95,22 @@ X_TWEETS_PER_HANDLE = 10           # bumped from 1 — needed for posts_last_7d
 PER_RUN_TIMEOUT_SECS = 900         # 15 min (subprocess gives 30 min outer cap)
 
 DEFAULT_MARKET_CODE = "global"
+
+
+def _proxy_config(market_code: str) -> dict:
+    """Build Apify proxyConfiguration for a given market.
+
+    - 'global' (Phase 1 default): no apifyProxyCountry — Apify routes via
+      datacenter proxy from any country.
+    - Any of the 8 APAC v1 codes ('sg','hk','tw','my','th','ph','id','vn'):
+      routes traffic via Apify datacenter proxy with that exit country.
+
+    Per RESEARCH.md §1 + Pitfall 1: Apify's apifyProxyCountry regex is ^[A-Z]{2}$.
+    Our MarketCode is lowercase — uppercase here before passing.
+    """
+    if market_code == "global":
+        return {"useApifyProxy": True}
+    return {"useApifyProxy": True, "apifyProxyCountry": market_code.upper()}
 
 
 # ---------------------------------------------------------------------------
