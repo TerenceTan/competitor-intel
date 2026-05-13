@@ -22,12 +22,14 @@ import {
   LayoutList,
   Activity,
   Shield,
+  Users,
 } from "lucide-react";
 import { MARKET_FLAGS } from "@/lib/constants";
 import { safeParseJson } from "@/lib/utils";
 import { SeverityBadge } from "@/components/shared/severity-badge";
 import { TimeAgo } from "@/components/ui/time-ago";
 import { AccountAccordion } from "@/components/shared/account-accordion";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /* ------------------------------------------------------------------ */
 /*  Sanitise scraper junk values to null                               */
@@ -118,6 +120,17 @@ function MiniKpi({
       </div>
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Follower count formatter (Phase 2 Digital Presence section)       */
+/* ------------------------------------------------------------------ */
+
+function formatFollowers(n: number | null): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -668,6 +681,97 @@ export default async function MarketDetailPage({
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* === Phase 2: Digital Presence === */}
+      <section>
+        <h2 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+          <Users className="w-4 h-4 text-gray-400" />
+          Digital Presence
+          {socialRows.length > 0 && (
+            <span className="text-xs font-normal text-gray-400">
+              {socialRows.length} {socialRows.length === 1 ? "broker" : "brokers"}
+            </span>
+          )}
+        </h2>
+
+        {socialRows.length === 0 ? (
+          <EmptyState
+            title="No social data yet for this market"
+            description="Check back after the next Apify run, or use the global view from the broker profile."
+          />
+        ) : (
+          <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50/60 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">Broker</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider w-10">Source</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">Facebook</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">Instagram</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">X</th>
+                </tr>
+              </thead>
+              <tbody>
+                {socialRows.map(({ competitor, cells, anyMarketSpecific }, idx) => {
+                  const isSelf = !!competitor.isSelf;
+                  return (
+                    <tr
+                      key={competitor.id}
+                      className={`border-b border-gray-100 transition-colors ${
+                        idx === socialRows.length - 1 ? "border-b-0" : ""
+                      } ${isSelf ? "bg-primary/[0.03]" : "hover:bg-gray-50/60"}`}
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/competitors/${competitor.id}?market=${marketCode}`}
+                            className={`font-medium transition-colors ${
+                              isSelf ? "text-primary font-semibold" : "text-gray-900 hover:text-primary"
+                            }`}
+                          >
+                            {competitor.name}
+                          </Link>
+                          {isSelf && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary">
+                              US
+                            </span>
+                          )}
+                          <span className="text-gray-400 text-[11px]">T{competitor.tier}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <DataSourceBadge isMarketSpecific={anyMarketSpecific} />
+                      </td>
+                      {(["facebook", "instagram", "x"] as const).map((platform) => {
+                        const cell = cells[platform];
+                        return (
+                          <td key={platform} className="px-4 py-2.5 font-mono text-xs">
+                            {cell === "scraper-failed" ? (
+                              <span className="inline-flex items-center gap-1 text-red-600 text-[11px]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-hidden />
+                                scraper failed
+                              </span>
+                            ) : cell == null ? (
+                              <span className="text-gray-300">—</span>
+                            ) : (
+                              <span className="text-gray-700">
+                                {formatFollowers(cell.followers)}
+                                {cell.postsLast7d != null && (
+                                  <span className="text-gray-400"> · {cell.postsLast7d}p</span>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* Two-column: Account Types + Recent Changes */}
