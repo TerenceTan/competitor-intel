@@ -158,18 +158,22 @@ def _is_x_tweet_within_7d(timestamp: str | int | float | None) -> bool:
 # ---------------------------------------------------------------------------
 # Facebook (apify/facebook-pages-scraper for metadata + posts-scraper for activity)
 # ---------------------------------------------------------------------------
-def _fetch_fb_page_metadata(client: ApifyClient, slugs: list[str]) -> dict[str, dict]:
+def _fetch_fb_page_metadata(client: ApifyClient, slugs: list[str], market_code: str) -> dict[str, dict]:
     """Call apify/facebook-pages-scraper for batched page metadata. Returns
     {slug_lower: {followers, likes}} keyed by slug. Empty dict on failure
     (the FB posts scraper still runs and writes a snapshot row with null
-    follower count)."""
+    follower count).
+
+    market_code threads into the actor's proxyConfiguration so the FB
+    pages scraper returns the per-market view of each page (D2-02)."""
     if not slugs:
         return {}
     try:
-        logger.info("FB pages: calling %s for %d pages", FB_PAGES_ACTOR_ID, len(slugs))
+        logger.info("FB pages: calling %s for %d pages (market=%s)", FB_PAGES_ACTOR_ID, len(slugs), market_code)
         run = client.actor(FB_PAGES_ACTOR_ID).call(
             run_input={
                 "startUrls": [{"url": f"https://www.facebook.com/{s}"} for s in slugs],
+                "proxyConfiguration": _proxy_config(market_code),
             },
             max_total_charge_usd=FB_PAGES_COST_CAP_USD,
             timeout_secs=PER_RUN_TIMEOUT_SECS,
@@ -233,13 +237,17 @@ def _fb_group_by_slug(items: list[dict], slugs: list[str]) -> dict[str, list[dic
 
 
 def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
-                 targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
+                 targets: list[tuple[str, str]], market_code: str) -> tuple[int, list[str]]:
     """Returns (records_written, error_messages).
 
     Two batched actor calls per run:
       1. apify/facebook-pages-scraper → followers + page likes per page
       2. apify/facebook-posts-scraper → recent posts for posts_last_7d +
          engagement metrics (likes/comments/shares per post averaged ÷ followers)
+
+    market_code is threaded into BOTH actor calls via proxyConfiguration and
+    used as the market_code for every social_snapshots / change_events /
+    apify_run_logs INSERT in this function (D2-02 / D2-04, RESEARCH §1+§2).
     """
     if not targets:
         return 0, []
@@ -252,15 +260,16 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
     err_msg: str | None = None
 
     # Step 1: batched page metadata (followers, likes)
-    pages_meta = _fetch_fb_page_metadata(client, slugs)
+    pages_meta = _fetch_fb_page_metadata(client, slugs, market_code)
 
     # Step 2: batched recent posts (for posts_last_7d + engagement)
     try:
-        logger.info("FB: calling %s for %d pages", FB_ACTOR_ID, len(slugs))
+        logger.info("FB: calling %s for %d pages (market=%s)", FB_ACTOR_ID, len(slugs), market_code)
         apify_run_obj = client.actor(FB_ACTOR_ID).call(
             run_input={
                 "startUrls": [{"url": f"https://www.facebook.com/{s}"} for s in slugs],
                 "resultsLimit": FB_RESULTS_LIMIT_PER_PAGE,
+                "proxyConfiguration": _proxy_config(market_code),
             },
             build=FB_ACTOR_BUILD,
             max_total_charge_usd=FB_COST_CAP_USD,
@@ -296,7 +305,7 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                 conn.execute(
                     "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
                     "AND market_code=? AND snapshot_date=?",
-                    (cid, "facebook", DEFAULT_MARKET_CODE, snapshot_date),
+                    (cid, "facebook", market_code, snapshot_date),
                 )
                 conn.execute(
                     """
@@ -309,7 +318,7 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                     (cid, "facebook", snapshot_date, follower_count, posts_last_7d,
                      engagement_rate,
                      (page_items[0].get("url") or page_items[0].get("postUrl")) if page_items else None,
-                     DEFAULT_MARKET_CODE, confidence),
+                     market_code, confidence),
                 )
                 written += 1
             except Exception as e:
@@ -328,7 +337,7 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                     (cid, "social_facebook", "scraper_zero_results", None,
                      json.dumps({"actor_id": FB_ACTOR_ID, "platform": "facebook",
                                  "apify_run_id": apify_run_obj.get("id")}),
-                     "medium", datetime.now(timezone.utc).isoformat(), DEFAULT_MARKET_CODE),
+                     "medium", datetime.now(timezone.utc).isoformat(), market_code),
                 )
             except Exception as e:
                 errors.append(f"fb_zero_event[{cid}]: {e}")
@@ -344,7 +353,7 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (run_id, apify_run_obj.get("id"), FB_ACTOR_ID, FB_ACTOR_BUILD,
-                 cid, "facebook", DEFAULT_MARKET_CODE,
+                 cid, "facebook", market_code,
                  "failed" if err_msg else platform_status,
                  len(page_items), None, err_msg,
                  apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
@@ -360,18 +369,21 @@ def run_facebook(client: ApifyClient, conn, run_id: int, snapshot_date: str,
 # ---------------------------------------------------------------------------
 # Instagram (profile scraper for metadata + post scraper for posts_last_7d)
 # ---------------------------------------------------------------------------
-def _fetch_ig_posts_per_handle(client: ApifyClient, handles: list[str]) -> dict[str, int]:
+def _fetch_ig_posts_per_handle(client: ApifyClient, handles: list[str], market_code: str) -> dict[str, int]:
     """Call apify/instagram-post-scraper for batched recent posts. Returns
     {handle_lower: posts_last_7d}. Empty dict on failure (snapshot still
-    writes with posts_last_7d=None)."""
+    writes with posts_last_7d=None).
+
+    market_code threads into the actor's proxyConfiguration (D2-02)."""
     if not handles:
         return {}
     try:
-        logger.info("IG posts: calling %s for %d handles", IG_POSTS_ACTOR_ID, len(handles))
+        logger.info("IG posts: calling %s for %d handles (market=%s)", IG_POSTS_ACTOR_ID, len(handles), market_code)
         run = client.actor(IG_POSTS_ACTOR_ID).call(
             run_input={
                 "directUrls": [f"https://www.instagram.com/{h}/" for h in handles],
                 "resultsLimit": IG_POSTS_LIMIT_PER_HANDLE,
+                "proxyConfiguration": _proxy_config(market_code),
             },
             max_total_charge_usd=IG_POSTS_COST_CAP_USD,
             timeout_secs=PER_RUN_TIMEOUT_SECS,
@@ -397,7 +409,10 @@ def _fetch_ig_posts_per_handle(client: ApifyClient, handles: list[str]) -> dict[
 
 
 def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
-                  targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
+                  targets: list[tuple[str, str]], market_code: str) -> tuple[int, list[str]]:
+    """market_code is threaded into both IG actor calls (profile + posts) via
+    proxyConfiguration and into every social_snapshots / change_events /
+    apify_run_logs INSERT in this function (D2-02 / D2-04)."""
     if not targets:
         return 0, []
     handles = [t[1] for t in targets]
@@ -410,9 +425,12 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
 
     # Step 1: batched profile data (followers)
     try:
-        logger.info("IG: calling %s for %d handles", IG_ACTOR_ID, len(handles))
+        logger.info("IG: calling %s for %d handles (market=%s)", IG_ACTOR_ID, len(handles), market_code)
         apify_run_obj = client.actor(IG_ACTOR_ID).call(
-            run_input={"usernames": handles},
+            run_input={
+                "usernames": handles,
+                "proxyConfiguration": _proxy_config(market_code),
+            },
             max_total_charge_usd=IG_COST_CAP_USD,
             timeout_secs=PER_RUN_TIMEOUT_SECS,
         ) or {}
@@ -424,7 +442,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
         logger.exception("IG actor call failed")
 
     # Step 2: batched recent posts (for posts_last_7d)
-    posts_per_handle = _fetch_ig_posts_per_handle(client, handles)
+    posts_per_handle = _fetch_ig_posts_per_handle(client, handles, market_code)
 
     # Index by username — the actor returns one item per username.
     by_user = {_normalize_slug(it.get("username")): it for it in items if it.get("username")}
@@ -441,7 +459,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                 conn.execute(
                     "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
                     "AND market_code=? AND snapshot_date=?",
-                    (cid, "instagram", DEFAULT_MARKET_CODE, snapshot_date),
+                    (cid, "instagram", market_code, snapshot_date),
                 )
                 conn.execute(
                     """
@@ -451,7 +469,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (cid, "instagram", snapshot_date, followers, posts_last_7d,
-                     f"https://www.instagram.com/{handle}/", DEFAULT_MARKET_CODE, confidence),
+                     f"https://www.instagram.com/{handle}/", market_code, confidence),
                 )
                 written += 1
                 platform_status = "success"
@@ -472,7 +490,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                     (cid, "social_instagram", "scraper_zero_results", None,
                      json.dumps({"actor_id": IG_ACTOR_ID, "platform": "instagram",
                                  "apify_run_id": apify_run_obj.get("id")}),
-                     "medium", datetime.now(timezone.utc).isoformat(), DEFAULT_MARKET_CODE),
+                     "medium", datetime.now(timezone.utc).isoformat(), market_code),
                 )
             except Exception as e:
                 errors.append(f"ig_zero_event[{cid}]: {e}")
@@ -489,7 +507,7 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (run_id, apify_run_obj.get("id"), IG_ACTOR_ID, None, cid, "instagram",
-                 DEFAULT_MARKET_CODE, "failed" if err_msg else platform_status,
+                 market_code, "failed" if err_msg else platform_status,
                  dataset_count, None, err_msg,
                  apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
                  apify_run_obj.get("finishedAt")),
@@ -505,7 +523,11 @@ def run_instagram(client: ApifyClient, conn, run_id: int, snapshot_date: str,
 # X / Twitter (kaitoeasyapi cheapest tweet scraper)
 # ---------------------------------------------------------------------------
 def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
-          targets: list[tuple[str, str]]) -> tuple[int, list[str]]:
+          targets: list[tuple[str, str]], market_code: str) -> tuple[int, list[str]]:
+    """market_code is threaded into the X actor call via proxyConfiguration
+    and into every social_snapshots / change_events / apify_run_logs INSERT
+    (D2-02 / D2-04). Per RESEARCH §1 A1: kaitoeasyapi honoring of
+    proxyConfiguration is assumed; verify via the operator smoke gate."""
     if not targets:
         return 0, []
     handles = [t[1] for t in targets]
@@ -517,14 +539,15 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
     err_msg: str | None = None
 
     try:
-        logger.info("X: calling %s for %d handles (×%d tweets each)",
-                    X_ACTOR_ID, len(handles), X_TWEETS_PER_HANDLE)
+        logger.info("X: calling %s for %d handles (×%d tweets each, market=%s)",
+                    X_ACTOR_ID, len(handles), X_TWEETS_PER_HANDLE, market_code)
         apify_run_obj = client.actor(X_ACTOR_ID).call(
             run_input={
                 "searchTerms": [f"from:{h}" for h in handles],
                 # bumped from 1: need ~10 tweets per handle to count posts_last_7d.
                 # actor minimum batch is 20/searchTerm so we get plenty either way.
                 "maxItems": len(handles) * X_TWEETS_PER_HANDLE,
+                "proxyConfiguration": _proxy_config(market_code),
             },
             max_total_charge_usd=X_COST_CAP_USD,
             timeout_secs=PER_RUN_TIMEOUT_SECS,
@@ -572,7 +595,7 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                 conn.execute(
                     "DELETE FROM social_snapshots WHERE competitor_id=? AND platform=? "
                     "AND market_code=? AND snapshot_date=?",
-                    (cid, "x", DEFAULT_MARKET_CODE, snapshot_date),
+                    (cid, "x", market_code, snapshot_date),
                 )
                 conn.execute(
                     """
@@ -582,7 +605,7 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (cid, "x", snapshot_date, followers, posts_last_7d,
-                     f"https://x.com/{handle}", DEFAULT_MARKET_CODE, confidence),
+                     f"https://x.com/{handle}", market_code, confidence),
                 )
                 written += 1
                 platform_status = "success"
@@ -604,7 +627,7 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                      json.dumps({"actor_id": X_ACTOR_ID, "platform": "x",
                                  "apify_run_id": apify_run_obj.get("id"),
                                  "mock_count": mock_count}),
-                     "medium", datetime.now(timezone.utc).isoformat(), DEFAULT_MARKET_CODE),
+                     "medium", datetime.now(timezone.utc).isoformat(), market_code),
                 )
             except Exception as e:
                 errors.append(f"x_zero_event[{cid}]: {e}")
@@ -621,7 +644,7 @@ def run_x(client: ApifyClient, conn, run_id: int, snapshot_date: str,
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (run_id, apify_run_obj.get("id"), X_ACTOR_ID, None, cid, "x",
-                 DEFAULT_MARKET_CODE, "failed" if err_msg else platform_status,
+                 market_code, "failed" if err_msg else platform_status,
                  dataset_count, None, err_msg,
                  apify_run_obj.get("startedAt") or datetime.now(timezone.utc).isoformat(),
                  apify_run_obj.get("finishedAt")),
