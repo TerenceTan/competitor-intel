@@ -669,6 +669,13 @@ def run():
     snapshot_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     client = ApifyClient(api_token)
 
+    # Per CONTEXT.md D2-08 / RESEARCH.md Pattern 3: empty/unset APIFY_MARKETS_ENABLED
+    # collapses to ['global'] — preserves Phase 1 free-tier-safe single-market
+    # behavior. Operator flips this on EC2 .env.local after Apify Starter upgrade.
+    TARGET_MARKETS = parse_target_markets(os.environ.get("APIFY_MARKETS_ENABLED"))
+    logger.info("TARGET_MARKETS=%s (APIFY_MARKETS_ENABLED=%r)",
+                TARGET_MARKETS, os.environ.get("APIFY_MARKETS_ENABLED"))
+
     fb_targets = [(c["id"], c["facebook_slug"])    for c in COMPETITORS if c.get("facebook_slug")]
     ig_targets = [(c["id"], c["instagram_handle"]) for c in COMPETITORS if c.get("instagram_handle")]
     x_targets  = [(c["id"], c["x_handle"])         for c in COMPETITORS if c.get("x_handle")]
@@ -679,18 +686,25 @@ def run():
     total_written = 0
     all_errors: list[str] = []
 
+    # One DB connection serves every (market × platform) iteration —
+    # contextlib.closing + WAL mode (Phase 1 invariant; RESEARCH §3 / D2-13).
+    # Market is the OUTER loop, platform is INNER — keeps each per-platform
+    # actor.call batched across all 11 competitors per market (RESEARCH §3).
     with closing(get_db()) as conn:
-        n, errs = run_facebook(client, conn, run_id, snapshot_date, fb_targets)
-        total_written += n
-        all_errors.extend(errs)
+        for market_code in TARGET_MARKETS:
+            logger.info("=== Market: %s ===", market_code)
 
-        n, errs = run_instagram(client, conn, run_id, snapshot_date, ig_targets)
-        total_written += n
-        all_errors.extend(errs)
+            n, errs = run_facebook(client, conn, run_id, snapshot_date, fb_targets, market_code)
+            total_written += n
+            all_errors.extend(errs)
 
-        n, errs = run_x(client, conn, run_id, snapshot_date, x_targets)
-        total_written += n
-        all_errors.extend(errs)
+            n, errs = run_instagram(client, conn, run_id, snapshot_date, ig_targets, market_code)
+            total_written += n
+            all_errors.extend(errs)
+
+            n, errs = run_x(client, conn, run_id, snapshot_date, x_targets, market_code)
+            total_written += n
+            all_errors.extend(errs)
 
     status = "success" if not all_errors else "partial"
     update_scraper_run(run_id, status, total_written, "; ".join(all_errors[:5]) or None)
