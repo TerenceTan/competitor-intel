@@ -26,16 +26,29 @@ export const dynamic = "force-dynamic";
 const APIFY_MONTHLY_CAP_USD = 5;
 
 export default async function DataHealthPage() {
-  const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // Compute time-window cutoffs once at the top of the request. Server
+  // components are evaluated per-request on the server (not re-rendered on
+  // the client), so Date.now() is the correct way to source "now". React
+  // 19's react-hooks/purity rule is conservative and flags it anyway —
+  // disabled inline rather than refactored, because the alternative
+  // (passing `now` as a prop or using next/headers) doesn't apply to a
+  // page-level server component. Same pattern as competitors/[id]/page.tsx.
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
+  const sevenDaysAgoIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const nowDate = new Date(now);
   const monthStartIso = new Date(
-    new Date().getFullYear(),
-    new Date().getMonth(),
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
     1,
   ).toISOString();
 
-  // Three parallel Drizzle queries — keeps page-load <500ms with the
-  // idx_apify_runs_started_at index from Plan 01-01.
-  const [latestRuns, costRow, zeroCounts] = await Promise.all([
+  // Four parallel Drizzle queries — keeps page-load <500ms with the
+  // idx_apify_runs_started_at index from Plan 01-01. Plan 02-05 adds a
+  // fourth zero-counts query GROUP BY (actor_id, market_code) so operators
+  // can see WHICH markets are failing for each scraper — critical for
+  // triage once the Phase 2 fanout flag is flipped.
+  const [latestRuns, costRow, zeroCounts, zeroByMarket] = await Promise.all([
     db
       .select({
         scraperName: scraperRuns.scraperName,
@@ -70,6 +83,26 @@ export default async function DataHealthPage() {
         ),
       )
       .groupBy(apifyRunLogs.actorId),
+
+    // NEW (Phase 2 / Plan 02-05): per-market breakdown of zero-result counts.
+    // Same WHERE clause as zeroCounts above; adds market_code to the GROUP BY.
+    // Operator triage: when a scraper shows N zero-results, which markets are
+    // failing? Indexed on started_at (idx_apify_runs_started_at, Plan 01-01)
+    // so adding market_code to GROUP BY is cheap.
+    db
+      .select({
+        actorId: apifyRunLogs.actorId,
+        marketCode: apifyRunLogs.marketCode,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(apifyRunLogs)
+      .where(
+        and(
+          eq(apifyRunLogs.status, "empty"),
+          gte(apifyRunLogs.startedAt, sevenDaysAgoIso),
+        ),
+      )
+      .groupBy(apifyRunLogs.actorId, apifyRunLogs.marketCode),
   ]);
 
   // Collapse latestRuns into a Map keyed by scraperName (most-recent wins per name).
@@ -135,6 +168,22 @@ export default async function DataHealthPage() {
               // see code review WR-01 / verification SC3.
               const zr =
                 zeroCounts.find((z) => ACTOR_TO_SCRAPER[z.actorId] === s.dbName)?.count ?? 0;
+              // Per-market breakdown for this scraper, sorted alphabetically by
+              // market code (hk, id, my, ph, sg, th, tw, vn). 'global' rows are
+              // excluded so Phase 1 free-tier users (APIFY_MARKETS_ENABLED unset,
+              // all rows tagged 'global') see no badge — visual unchanged from
+              // Phase 1 until the operator flips the flag. Same ACTOR_TO_SCRAPER
+              // equality lookup as the total count above (NOT a substring match —
+              // see WR-01).
+              const breakdown = zeroByMarket
+                .filter(
+                  (z) =>
+                    ACTOR_TO_SCRAPER[z.actorId] === s.dbName &&
+                    z.marketCode !== "global",
+                )
+                .sort((a, b) => a.marketCode.localeCompare(b.marketCode))
+                .map((z) => `${z.marketCode}:${Number(z.count)}`)
+                .join(", ");
               const statusLabel = latest?.status ?? "never run";
               const statusClass =
                 latest?.status === "success"
@@ -153,7 +202,14 @@ export default async function DataHealthPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     {Number(zr) > 0 ? (
-                      <span className="text-amber-600">{Number(zr)}</span>
+                      <span className="inline-flex items-baseline gap-1.5">
+                        <span className="text-amber-600">{Number(zr)}</span>
+                        {breakdown && (
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            ({breakdown})
+                          </span>
+                        )}
+                      </span>
                     ) : (
                       "0"
                     )}
