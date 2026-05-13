@@ -63,7 +63,20 @@ Plans:
   2. Per-market views display Instagram and X data alongside Facebook, all attributed at scrape time via per-market URLs/handles (not inferred from post content)
   3. Competitors with no per-market handle for a platform fall back gracefully to `global` data — no empty panels, no double-counting against a competitor with a real per-market account
   4. Each Apify call uses `apifyProxyCountry: <market_code>` so geo-routed competitor pages return market-correct content; `apify_run_logs` records per-(competitor, platform, market) diagnostics for triage
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1** (parallel — no overlapping files)
+- [ ] 02-01-PLAN.md — Fix `src/lib/markets.ts PRIORITY_MARKETS` to the 8 APAC v1 codes (drop CN/MN, add PH)
+- [ ] 02-02-PLAN.md — `scrapers/market_config.py` APAC_V1_MARKETS + `parse_target_markets()` feature-flag parser + Wave 0 unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 02-03-PLAN.md — Refactor `scrapers/apify_social.py` to thread `market_code` through every actor call (proxyConfiguration) + per-market writes to `social_snapshots`, `apify_run_logs`, `change_events`; mock-Apify integration tests
+
+**Wave 3** *(blocked on 02-01 and 02-03)*
+- [ ] 02-04-PLAN.md — Add Digital Presence section to `/markets/[code]/page.tsx` (competitor-row table with market-first / global-fallback resolver)
+- [ ] 02-05-PLAN.md — Extend `/admin/data-health` with per-market zero-result breakdown badge (parallel GROUP BY query)
+
 **UI hint**: yes
 
 ### Phase 3: BigQuery SoS Sync + Better Promo Extraction
@@ -111,7 +124,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — Apify + Scaffolding + Trust Schema | 6/6 | Complete (operator follow-ups outstanding before Phase 2 EC2 deploy) | 2026-05-04 |
-| 2. Per-Market Social Fanout (8 APAC Markets) | 0/TBD | Not started | - |
+| 2. Per-Market Social Fanout (8 APAC Markets) | 0/5 | Not started | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |
 | 5. Confidence & Freshness UX Polish | 0/TBD | Not started | - |
