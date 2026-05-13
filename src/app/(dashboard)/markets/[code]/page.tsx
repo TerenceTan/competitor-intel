@@ -6,8 +6,9 @@ import {
   promoSnapshots,
   accountTypeSnapshots,
   changeEvents,
+  socialSnapshots,
 } from "@/db/schema";
-import { eq, sql, desc, and, gte } from "drizzle-orm";
+import { eq, sql, desc, and, gte, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
@@ -21,12 +22,14 @@ import {
   LayoutList,
   Activity,
   Shield,
+  Users,
 } from "lucide-react";
 import { MARKET_FLAGS } from "@/lib/constants";
 import { safeParseJson } from "@/lib/utils";
 import { SeverityBadge } from "@/components/shared/severity-badge";
 import { TimeAgo } from "@/components/ui/time-ago";
 import { AccountAccordion } from "@/components/shared/account-accordion";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /* ------------------------------------------------------------------ */
 /*  Sanitise scraper junk values to null                               */
@@ -120,6 +123,17 @@ function MiniKpi({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Follower count formatter (Phase 2 Digital Presence section)       */
+/* ------------------------------------------------------------------ */
+
+function formatFollowers(n: number | null): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -155,6 +169,9 @@ export default async function MarketDetailPage({
     marketAccountRows,
     globalAccountRows,
     recentMarketChanges,
+    marketSocialRows,
+    globalSocialRows,
+    socialZeroResultRows,
   ] = await Promise.all([
     db
       .select()
@@ -204,6 +221,50 @@ export default async function MarketDetailPage({
       )
       .orderBy(desc(changeEvents.detectedAt))
       .limit(10),
+    // Phase 2 — Digital Presence: latest market-specific social snapshot per (competitor, platform)
+    // for FB/IG/X only. Mirrors the MAX(id) GROUP BY pattern used for pricing/promos/accounts above.
+    db
+      .select()
+      .from(socialSnapshots)
+      .where(
+        sql`${socialSnapshots.marketCode} = ${marketCode}
+            AND ${socialSnapshots.platform} IN ('facebook','instagram','x')
+            AND ${socialSnapshots.id} IN (
+              SELECT MAX(id) FROM social_snapshots
+              WHERE market_code = ${marketCode}
+                AND platform IN ('facebook','instagram','x')
+              GROUP BY competitor_id, platform
+            )`
+      ),
+    // Phase 2 — Digital Presence: global fallback pool (RESEARCH.md Pattern 4 / D2-10).
+    db
+      .select()
+      .from(socialSnapshots)
+      .where(
+        sql`${socialSnapshots.marketCode} = 'global'
+            AND ${socialSnapshots.platform} IN ('facebook','instagram','x')
+            AND ${socialSnapshots.id} IN (
+              SELECT MAX(id) FROM social_snapshots
+              WHERE market_code = 'global'
+                AND platform IN ('facebook','instagram','x')
+              GROUP BY competitor_id, platform
+            )`
+      ),
+    // Phase 2 — Digital Presence: scraper_zero_results within last 7 days for FB/IG/X on THIS
+    // market. Used to render the inline "scraper failed" indicator (D2-14 / TRUST-04 carry-forward).
+    db
+      .select()
+      .from(changeEvents)
+      .where(
+        and(
+          eq(changeEvents.fieldName, "scraper_zero_results"),
+          eq(changeEvents.marketCode, marketCode),
+          gte(changeEvents.detectedAt, weekAgo),
+          inArray(changeEvents.domain, ["social_facebook", "social_instagram", "social_x"])
+        )
+      )
+      .orderBy(desc(changeEvents.detectedAt))
+      .limit(500),
   ]);
 
   // Build lookup maps
@@ -211,6 +272,92 @@ export default async function MarketDetailPage({
   const globalPricingMap = new Map(globalPricingRows.map((p) => [p.competitorId, p]));
   const marketAccountMap = new Map(marketAccountRows.map((a) => [a.competitorId, a]));
   const globalAccountMap = new Map(globalAccountRows.map((a) => [a.competitorId, a]));
+
+  // === Phase 2: Social fanout fallback resolution (RESEARCH.md Pattern 4 / D2-10) ===
+  type SocialPlatform = "facebook" | "instagram" | "x";
+  type SocialCell = {
+    followers: number | null;
+    postsLast7d: number | null;
+    isMarketSpecific: boolean;
+  };
+  type SocialKey = `${string}|${SocialPlatform}`;
+
+  const socialMap = new Map<SocialKey, SocialCell>();
+
+  // Pass 1: market-specific rows take precedence.
+  for (const snap of marketSocialRows) {
+    const platform = snap.platform as SocialPlatform;
+    if (platform !== "facebook" && platform !== "instagram" && platform !== "x") continue;
+    const k: SocialKey = `${snap.competitorId}|${platform}`;
+    if (!socialMap.has(k)) {
+      socialMap.set(k, {
+        followers: snap.followers,
+        postsLast7d: snap.postsLast7d,
+        isMarketSpecific: true,
+      });
+    }
+  }
+
+  // Pass 2: global fallback — only fill keys NOT already set.
+  for (const snap of globalSocialRows) {
+    const platform = snap.platform as SocialPlatform;
+    if (platform !== "facebook" && platform !== "instagram" && platform !== "x") continue;
+    const k: SocialKey = `${snap.competitorId}|${platform}`;
+    if (!socialMap.has(k)) {
+      socialMap.set(k, {
+        followers: snap.followers,
+        postsLast7d: snap.postsLast7d,
+        isMarketSpecific: false,
+      });
+    }
+  }
+
+  // Per-(competitor, platform) zero-result lookup: a Set of "competitorId|platform"
+  // keys for which a scraper_zero_results event was logged for the CURRENT marketCode
+  // in the last 7 days. Used to render the inline "scraper failed" indicator.
+  const zeroResultKeys = new Set<SocialKey>();
+  for (const ev of socialZeroResultRows) {
+    // domain shape: 'social_facebook' / 'social_instagram' / 'social_x' (per apify_social.py)
+    const platform = ev.domain.replace(/^social_/, "") as SocialPlatform;
+    if (platform !== "facebook" && platform !== "instagram" && platform !== "x") continue;
+    zeroResultKeys.add(`${ev.competitorId}|${platform}`);
+  }
+
+  // Build the table rows: filter to competitors that have ANY data at all
+  // (snapshot in either pass OR a recent zero-result event on any platform).
+  const socialRows = allCompetitors
+    .map((c) => {
+      const cells: Record<SocialPlatform, SocialCell | "scraper-failed" | null> = {
+        facebook: null,
+        instagram: null,
+        x: null,
+      };
+      let hasAnyData = false;
+      let anyMarketSpecific = false;
+      for (const platform of ["facebook", "instagram", "x"] as const) {
+        const k: SocialKey = `${c.id}|${platform}`;
+        const cell = socialMap.get(k);
+        if (cell) {
+          cells[platform] = cell;
+          hasAnyData = true;
+          if (cell.isMarketSpecific) anyMarketSpecific = true;
+        } else if (zeroResultKeys.has(k)) {
+          cells[platform] = "scraper-failed";
+          hasAnyData = true;
+        }
+      }
+      return { competitor: c, cells, hasAnyData, anyMarketSpecific };
+    })
+    .filter((r) => r.hasAnyData);
+
+  // Sort: self first, then competitors with any market-specific cell, then tier.
+  socialRows.sort((a, b) => {
+    const selfA = a.competitor.isSelf ? 1 : 0;
+    const selfB = b.competitor.isSelf ? 1 : 0;
+    if (selfA !== selfB) return selfB - selfA;
+    if (a.anyMarketSpecific !== b.anyMarketSpecific) return a.anyMarketSpecific ? -1 : 1;
+    return a.competitor.tier - b.competitor.tier;
+  });
 
   // Merge pricing: market-specific takes priority, fallback to global
   const pricingData = allCompetitors.map((c) => {
@@ -534,6 +681,97 @@ export default async function MarketDetailPage({
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* === Phase 2: Digital Presence === */}
+      <section>
+        <h2 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+          <Users className="w-4 h-4 text-gray-400" />
+          Digital Presence
+          {socialRows.length > 0 && (
+            <span className="text-xs font-normal text-gray-400">
+              {socialRows.length} {socialRows.length === 1 ? "broker" : "brokers"}
+            </span>
+          )}
+        </h2>
+
+        {socialRows.length === 0 ? (
+          <EmptyState
+            title="No social data yet for this market"
+            description="Check back after the next Apify run, or use the global view from the broker profile."
+          />
+        ) : (
+          <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50/60 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">Broker</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider w-10">Source</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">Facebook</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">Instagram</th>
+                  <th className="text-left px-4 py-2.5 text-gray-500 font-medium text-[11px] uppercase tracking-wider">X</th>
+                </tr>
+              </thead>
+              <tbody>
+                {socialRows.map(({ competitor, cells, anyMarketSpecific }, idx) => {
+                  const isSelf = !!competitor.isSelf;
+                  return (
+                    <tr
+                      key={competitor.id}
+                      className={`border-b border-gray-100 transition-colors ${
+                        idx === socialRows.length - 1 ? "border-b-0" : ""
+                      } ${isSelf ? "bg-primary/[0.03]" : "hover:bg-gray-50/60"}`}
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/competitors/${competitor.id}?market=${marketCode}`}
+                            className={`font-medium transition-colors ${
+                              isSelf ? "text-primary font-semibold" : "text-gray-900 hover:text-primary"
+                            }`}
+                          >
+                            {competitor.name}
+                          </Link>
+                          {isSelf && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary">
+                              US
+                            </span>
+                          )}
+                          <span className="text-gray-400 text-[11px]">T{competitor.tier}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <DataSourceBadge isMarketSpecific={anyMarketSpecific} />
+                      </td>
+                      {(["facebook", "instagram", "x"] as const).map((platform) => {
+                        const cell = cells[platform];
+                        return (
+                          <td key={platform} className="px-4 py-2.5 font-mono text-xs">
+                            {cell === "scraper-failed" ? (
+                              <span className="inline-flex items-center gap-1 text-red-600 text-[11px]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-hidden />
+                                scraper failed
+                              </span>
+                            ) : cell == null ? (
+                              <span className="text-gray-300">—</span>
+                            ) : (
+                              <span className="text-gray-700">
+                                {formatFollowers(cell.followers)}
+                                {cell.postsLast7d != null && (
+                                  <span className="text-gray-400"> · {cell.postsLast7d}p</span>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* Two-column: Account Types + Recent Changes */}
