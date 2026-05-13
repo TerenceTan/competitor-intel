@@ -168,6 +168,22 @@ export default async function DataHealthPage() {
               // see code review WR-01 / verification SC3.
               const zr =
                 zeroCounts.find((z) => ACTOR_TO_SCRAPER[z.actorId] === s.dbName)?.count ?? 0;
+              // Per-market breakdown for this scraper, sorted alphabetically by
+              // market code (hk, id, my, ph, sg, th, tw, vn). 'global' rows are
+              // excluded so Phase 1 free-tier users (APIFY_MARKETS_ENABLED unset,
+              // all rows tagged 'global') see no badge — visual unchanged from
+              // Phase 1 until the operator flips the flag. Same ACTOR_TO_SCRAPER
+              // equality lookup as the total count above (NOT a substring match —
+              // see WR-01).
+              const breakdown = zeroByMarket
+                .filter(
+                  (z) =>
+                    ACTOR_TO_SCRAPER[z.actorId] === s.dbName &&
+                    z.marketCode !== "global",
+                )
+                .sort((a, b) => a.marketCode.localeCompare(b.marketCode))
+                .map((z) => `${z.marketCode}:${Number(z.count)}`)
+                .join(", ");
               const statusLabel = latest?.status ?? "never run";
               const statusClass =
                 latest?.status === "success"
@@ -186,7 +202,14 @@ export default async function DataHealthPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     {Number(zr) > 0 ? (
-                      <span className="text-amber-600">{Number(zr)}</span>
+                      <span className="inline-flex items-baseline gap-1.5">
+                        <span className="text-amber-600">{Number(zr)}</span>
+                        {breakdown && (
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            ({breakdown})
+                          </span>
+                        )}
+                      </span>
                     ) : (
                       "0"
                     )}
