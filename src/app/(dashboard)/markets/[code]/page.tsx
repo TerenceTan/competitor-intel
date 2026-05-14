@@ -576,6 +576,7 @@ export default async function MarketDetailPage({
     .map((r): EmergingItem | null => {
       const comp = competitorById.get(r.competitorId);
       if (!comp) return null; // SERP found a competitor not yet in config — skip
+      if (comp.isSelf) return null; // Pepperstone shows in own-brand SERPs (e.g., HK) — never emerge ourselves
       return {
         competitor: comp,
         queriesAppeared: r.queriesAppeared,
