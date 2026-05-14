@@ -36,8 +36,14 @@ for market in "${MARKETS[@]}"; do
 done
 
 echo
+echo "──── consolidated review matrix ────"
+$PY scrapers/admin/build_competitor_matrix.py
+
+echo
 echo "════════════════════════════════════════════════════════════"
 echo " DONE at $(date -u +%FT%TZ)"
 echo " Outputs:"
 ls -la logs/serp_research_*.csv logs/market_presence_*.csv 2>/dev/null || true
+echo " Review doc:"
+ls -la logs/PHASE_2_1_COMPETITOR_MATRIX.md 2>/dev/null || true
 echo "════════════════════════════════════════════════════════════"
