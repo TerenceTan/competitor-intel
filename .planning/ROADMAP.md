@@ -89,7 +89,19 @@ Plans:
   3. "Emerging competitors" rail appears at bottom of `/markets/<code>` listing competitors with STRONG SERP signal (from `serp_research_<market>.csv`) but no `active` row in `competitor_markets` — operator watchlist
   4. `/admin/competitors/<id>` lets operator edit per-market status (active / planned / withdrawn) without redeploys
   5. Initial seed of `competitor_markets` from operator-approved validator output for SG + VN (markets researched in Phase 2.1 prep)
-**Plans**: TBD (drafted after marketing-team validator review)
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+- [ ] 02.1-01-PLAN.md — competitor_markets table (Drizzle + Python migration; CHECK constraint on 4-value status enum + composite PK)
+
+**Wave 2** *(blocked on Wave 1; parallel-safe — no file overlap)*
+- [ ] 02.1-02-PLAN.md — Operator import script (scrapers/admin/import_market_decisions.py reads PHASE_2_1_COMPETITOR_REVIEW.xlsx → INSERT OR REPLACE with --purge / --dry-run; audit row per D2.1-10)
+- [ ] 02.1-03-PLAN.md — /markets/[code] default-safe curation filter (D2.1-04 / D2.1-05) + Emerging Competitors rail reading logs/serp_research_<market>.csv
+
+**Wave 3** *(blocked on Wave 1; parallel-safe with Wave 2 — no file overlap)*
+- [ ] 02.1-04-PLAN.md — Admin per-market status editor at /admin/competitors/[id] + upsert/clear server actions + /admin/data-health "N of 8 markets seeded" tile (D2.1-12)
+
 **Prep done (pre-plan)**:
 - `scrapers/admin/serp_market_research.py` — SERP scrape per market with own-brand filter + ccTLD pattern matching
 - `scrapers/admin/validate_market_presence.py` — 5-signal validator (URL/lang/payment/app-store/WikiFX) + SERP combiner
@@ -142,7 +154,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 |-------|----------------|--------|-----------|
 | 1. Foundation — Apify + Scaffolding + Trust Schema | 6/6 | Complete (operator follow-ups outstanding before Phase 2 EC2 deploy) | 2026-05-04 |
 | 2. Per-Market Social Fanout (8 APAC Markets) | 5/5 | Code complete; operator follow-up for 2-market Apify smoke (APIFY_MARKET_FANOUT_SMOKE_PENDING.txt) | 2026-05-14 |
-| 2.1. Per-Market Competitor Curation (SHOW/HIDE + Emerging rail) | 0/TBD | Prep done (SERP + validator scripts shipped); plans pending marketing-team SHOW-list review | - |
+| 2.1. Per-Market Competitor Curation (SHOW/HIDE + Emerging rail) | 0/4 | Plans drafted (4 plans, 3 waves); default-safe contract preserves Phase 2 behavior until marketing seeds the table | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |
 | 5. Confidence & Freshness UX Polish | 0/TBD | Not started | - |
