@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 code complete — 5/5 plans shipped (02-01..02-05); MARKET-04 unblocked (PRIORITY_MARKETS now 8 v1 codes); APIFY_MARKETS_ENABLED feature flag in apify_social.py defaults to ['global'] preserving Phase 1 behavior; /markets/[code] has new Digital Presence section with global fallback; /admin/data-health shows per-market zero-result breakdown. Operator follow-up: 2-market Apify smoke (sg,my) deferred via APIFY_MARKET_FANOUT_SMOKE_PENDING.txt marker — gated on Apify Starter upgrade. Per-market competitor-list market research → Phase 2.1.
-last_updated: "2026-05-14T01:00:00Z"
-last_activity: 2026-05-14 -- Phase 2 wave-3 complete (02-04 markets Digital Presence + 02-05 data-health per-market breakdown); all 5 Phase 2 plans merged into main
+stopped_at: context exhaustion at 76% (2026-05-14)
+last_updated: "2026-05-14T11:48:45.548Z"
+last_activity: 2026-05-14 -- Phase 02.1 execution started
 progress:
-  total_phases: 5
-  completed_phases: 1
-  total_plans: 15
+  total_phases: 6
+  completed_phases: 2
+  total_plans: 19
   completed_plans: 15
-  percent: 100
+  percent: 79
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-04)
 
 **Core value:** Promo intelligence per market — competitor promo activity broken down by market, accurate enough that marketing managers trust it.
-**Current focus:** Phase 01 — foundation-apify-scaffolding-trust-schema
+**Current focus:** Phase 02.1 — per-market-competitor-curation-operator-driven-show-hide
 
 ## Current Position
 
-Phase: 02 (per-market-social-fanout-8-apac-markets) — CODE COMPLETE (5/5 plans shipped, operator smoke deferred)
-Plan: 5 of 5 complete (02-01 markets.ts → 8 v1 codes, 02-02 market_config + parser + 15 unit tests, 02-03 apify_social market threading + feature flag, 02-04 /markets/[code] Digital Presence, 02-05 /admin/data-health per-market breakdown)
-Status: Phase 2 code complete. Feature flag `APIFY_MARKETS_ENABLED` defaults to global-only — production cron behaves identically to Phase 1 until operator (a) upgrades Apify free → Starter ($49/mo), (b) sets env var on EC2, (c) runs 2-market smoke per APIFY_MARKET_FANOUT_SMOKE_PENDING.txt.
-Last activity: 2026-05-14 -- Phase 2 wave-3 complete (02-04 + 02-05 merged into main); all 3 waves shipped in single session
+Phase: 02.1 (per-market-competitor-curation-operator-driven-show-hide) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 02.1
+Last activity: 2026-05-14 -- Phase 02.1 execution started
 
 Progress: [██████████] 100%
 
@@ -133,6 +133,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-04T06:48:13Z
-Stopped at: Phase 1 complete — all 6 plans shipped (01-01..01-06); TRUST-04 + TRUST-05 closed; FB cutover from Thunderbit to apify_social.py final; ready to transition to Phase 2 (Per-Market Social Fanout) once Phase 1 operator follow-ups (Apify token + cap, EC2 Python check + pip install + smoke run, 9 Healthchecks.io URLs) are completed
-Resume file: (Phase 1 complete — next is /gsd-transition or /gsd-execute-phase 02)
+Last session: 2026-05-14T09:04:24.966Z
+Stopped at: context exhaustion at 76% (2026-05-14)
+Resume file: None
