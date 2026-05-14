@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: phase_complete
 stopped_at: Phase 02.1 code complete — 4/4 plans shipped, 12/12 must-haves verified, 4 human-verification items deferred to live-server smoke
-last_updated: "2026-05-14T13:05:00Z"
-last_activity: 2026-05-14 -- Phase 02.1 complete (all 4 plans landed in single session; competitor_markets table + import script + /markets curation filter + Emerging rail + admin per-market editor + data-health markets-seeded tile)
+last_updated: "2026-05-14T14:30:00Z"
+last_activity: 2026-05-14 -- Quick task 260514-xbj shipped (Phase 2.1 bugfixes 2.2a-1: is_self filter on Emerging rail + competitor_markets Drizzle migration); Phase 02.1 remains code complete
 progress:
   total_phases: 6
   completed_phases: 3
@@ -131,8 +131,14 @@ Items acknowledged and carried forward from previous milestone close:
 |----------|------|--------|-------------|
 | *(none)* | | | |
 
+## Quick Tasks Completed
+
+| Quick ID | Title | Commits | Completed | Notes |
+|----------|-------|---------|-----------|-------|
+| 260514-xbj | Phase 2.1 bugfixes 2.2a-1 — filter Pepperstone out of Emerging rail + create competitor_markets on Next.js boot | e98f9e8, 8b364ee | 2026-05-14 | Restores default-safe contract on fresh EC2; mirrors Python migration byte-for-byte (no schema drift). Live `/markets/hk` smoke deferred to EC2 deploy. SUMMARY: `.planning/quick/260514-xbj-phase-2-1-bugfixes-2-2a-1-filter-out-pep/260514-xbj-SUMMARY.md` |
+
 ## Session Continuity
 
-Last session: 2026-05-14T09:04:24.966Z
-Stopped at: context exhaustion at 76% (2026-05-14)
+Last session: 2026-05-14T14:30:00Z
+Stopped at: quick task 260514-xbj complete (Phase 2.1 bugfixes 2.2a-1)
 Resume file: None
