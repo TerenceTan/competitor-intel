@@ -91,7 +91,132 @@ QUERY_SETS: dict[str, list[str]] = {
         "exness vietnam",
         "ic markets vietnam",
     ],
-    # hk / tw / my / th / ph / id query sets to be added once SG + VN validate
+    "hk": [
+        # Generic (8) — Hong Kong is English-finance-dominant but with significant
+        # Cantonese / Traditional Chinese organic content for retail trading.
+        "forex broker hong kong",
+        "best cfd broker hong kong",
+        "mt4 broker hong kong",
+        "cfd trading hong kong",
+        "online trading platform hong kong",
+        "leveraged trading hong kong",
+        "外匯經紀商 香港",            # forex broker hk
+        "外匯交易平台 香港",          # forex trading platform hk
+        # Spec (5)
+        "lowest spread forex hong kong",
+        "sfc licensed forex broker",  # SFC = HK regulator
+        "受監管外匯經紀商",            # regulated forex broker
+        "demo forex hong kong",
+        "ecn broker hong kong",
+        # Branded (2)
+        "ic markets hong kong",
+        "ig hong kong",
+    ],
+    "tw": [
+        # Generic (8) — Traditional Chinese-dominant; mix in English for SEO-tuned
+        # foreign brokers. languageCode=zh-TW in MARKET_PARAMS.
+        "外匯經紀商 台灣",            # forex broker taiwan
+        "差價合約 台灣",              # CFD taiwan
+        "forex broker taiwan",
+        "外匯交易 台灣",              # forex trading taiwan
+        "線上交易平台 台灣",          # online trading platform tw
+        "best forex broker taiwan",
+        "mt4 broker taiwan",
+        "cfd trading platform taiwan",
+        # Spec (5)
+        "點差最低 外匯 台灣",         # lowest spread forex
+        "受FSC監管 外匯",             # FSC-regulated forex
+        "ecn forex 台灣",
+        "demo forex 台灣",
+        "槓桿交易 台灣",              # leveraged trading tw
+        # Branded (2)
+        "exness 台灣",
+        "ic markets 台灣",
+    ],
+    "my": [
+        # Generic (8) — Malaysia is EN-finance-dominant but some Bahasa Malaysia
+        # content exists in retail forex space.
+        "forex broker malaysia",
+        "best cfd broker malaysia",
+        "mt4 broker malaysia",
+        "forex trading malaysia",
+        "platform trading malaysia",        # Bahasa
+        "pelaburan forex malaysia",         # forex investment
+        "cfd trading malaysia",
+        "online trading platform malaysia",
+        # Spec (5)
+        "lowest spread forex malaysia",
+        "sc malaysia regulated broker",     # SC = Securities Commission MY
+        "labuan fsa licensed broker",       # Labuan FSA = offshore regulator
+        "islamic forex account malaysia",
+        "demo forex malaysia",
+        # Branded (2)
+        "exness malaysia",
+        "ic markets malaysia",
+    ],
+    "th": [
+        # Generic (8) — Thai-dominant; mix in some English for SEO-tuned foreign
+        # brokers. languageCode=th in MARKET_PARAMS.
+        "โบรกเกอร์ ฟอเร็กซ์ ไทย",        # forex broker thailand
+        "forex broker thailand",
+        "เทรด forex ไทย",                # trade forex thailand
+        "โบรกเกอร์ cfd ไทย",
+        "best forex broker thailand",
+        "mt4 broker thailand",
+        "โบรกเกอร์ ฟอเร็กซ์ ที่ดีที่สุด", # best forex broker (Thai)
+        "เปิดบัญชี forex ไทย",           # open forex account thailand
+        # Spec (5)
+        "โบรกเกอร์ spread ต่ำ",          # low spread broker
+        "โบรกเกอร์ ecn ไทย",
+        "ฟอเร็กซ์ มือใหม่",              # forex for beginners
+        "demo forex ไทย",
+        "regulated forex broker thailand",
+        # Branded (2)
+        "exness thailand",
+        "xm thailand",
+    ],
+    "ph": [
+        # Generic (8) — Philippines is English-finance-dominant with Tagalog
+        # mixed in. EN queries dominate; one Tagalog hedge.
+        "forex broker philippines",
+        "best cfd broker philippines",
+        "mt4 broker philippines",
+        "forex trading philippines",
+        "cfd trading platform philippines",
+        "online trading philippines",
+        "bsp licensed forex broker",        # BSP = Bangko Sentral ng Pilipinas
+        "broker forex pilipinas",           # Tagalog hedge
+        # Spec (5)
+        "lowest spread forex philippines",
+        "ecn forex broker philippines",
+        "islamic forex account philippines",
+        "demo forex philippines",
+        "forex broker philippines beginners",
+        # Branded (2)
+        "ic markets philippines",
+        "xm philippines",
+    ],
+    "id": [
+        # Generic (8) — Bahasa Indonesia-dominant for retail finance content.
+        # languageCode=id in MARKET_PARAMS. Mix in English for foreign brokers.
+        "broker forex indonesia",
+        "broker cfd indonesia",
+        "broker mt4 indonesia",
+        "forex broker indonesia",
+        "platform trading indonesia",
+        "trading forex indonesia",
+        "broker forex terbaik",             # best forex broker
+        "platform cfd indonesia",
+        # Spec (5)
+        "spread rendah forex indonesia",    # low spread
+        "broker forex bappebti",            # BAPPEBTI = ID regulator
+        "broker forex regulated indonesia",
+        "akun islamic forex indonesia",
+        "demo forex indonesia",
+        # Branded (2)
+        "exness indonesia",
+        "ic markets indonesia",
+    ],
 }
 
 # Per-competitor brand tokens for own-brand filtering. Each token is matched
