@@ -112,6 +112,35 @@ _BRAND_TOKENS_OVERRIDE: dict[str, list[str]] = {
     "pepperstone": ["pepperstone"],
 }
 
+# Per-competitor domain PATTERNS for matching SERP URLs to a competitor.
+# Most brokers operate multiple regional domains (exness.com, exness.eu,
+# exness.com.vn, ...); config.py only stores ONE website per competitor so
+# exact-domain matching missed regional variants. The first SG+VN run made
+# this obvious: Exness — reportedly dominant in VN — only matched 1 own-
+# brand hit because their VN landing is on exness.com.vn or exness.eu, not
+# exness.com.
+#
+# Two pattern types:
+#   - "label" patterns match if ANY dot-separated domain label CONTAINS the
+#     pattern as a substring. Use for brand roots that are unique enough to
+#     not false-positive (e.g. "icmarkets", "exness", "phillipnova").
+#   - "exact" patterns are matched against the full domain. Use for brand
+#     roots too short or ambiguous to label-match safely (e.g. "xm" matches
+#     "xm.com" but should also catch "xmglobal.com" → exact list both).
+_BRAND_DOMAIN_PATTERNS: dict[str, dict[str, list[str]]] = {
+    "ic-markets": {"label": ["icmarkets"]},
+    "exness": {"label": ["exness"]},
+    "vantage": {"label": ["vantagemarkets", "vantagefx"]},
+    "xm": {"exact": ["xm.com", "xmglobal.com", "xmtrading.com", "xm.co"]},
+    "fxpro": {"label": ["fxpro"]},
+    "fbs": {"exact": ["fbs.com", "fbs.eu", "fbs.io"]},  # bare "fbs" too short for label match
+    "hfm": {"label": ["hfm", "hotforex", "hfmarkets"]},
+    "iux": {"exact": ["iux.com", "iuxmarkets.com"]},
+    "mitrade": {"label": ["mitrade"]},
+    "tmgm": {"label": ["tmgm"]},
+    "pepperstone": {"label": ["pepperstone"]},
+}
+
 # Localization params for the Apify google-search-scraper actor
 MARKET_PARAMS: dict[str, dict[str, str]] = {
     "sg": {"countryCode": "sg", "languageCode": "en"},
@@ -134,31 +163,33 @@ def _domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def _build_competitor_domain_map() -> dict[str, str]:
-    """Returns {domain: competitor_id} for every competitor in config.py.
+def _match_competitor(domain: str) -> str | None:
+    """Return competitor_id whose domain pattern matches `domain`, or None.
 
-    Multi-domain competitors (entities with .com + .co.za etc.) all map to
-    the same competitor_id."""
-    out: dict[str, str] = {}
-    for c in COMPETITORS:
-        cid = c.get("id")
-        if not cid:
-            continue
-        if c.get("website"):
-            out[_domain("https://" + c["website"]) if "://" not in c["website"] else _domain(c["website"])] = cid
-        # Pull from any account_urls / pricing_url / promo_url to catch
-        # market-specific subdomains like icmarkets.com vs icmarkets.com.au
-        for url_field in ("pricing_url", "promo_url"):
-            u = c.get(url_field)
-            if u:
-                d = _domain(u)
-                if d:
-                    out.setdefault(d, cid)
-        for u in c.get("account_urls", []) or []:
-            d = _domain(u)
-            if d:
-                out.setdefault(d, cid)
-    return out
+    Pattern resolution order:
+      1. Exact patterns (full-domain equality)
+      2. Label patterns (substring within ANY dot-separated label)
+
+    Falls back to None — surfaces the domain as "unknown" for review.
+    """
+    if not domain:
+        return None
+    labels = domain.split(".")
+    for cid, patterns in _BRAND_DOMAIN_PATTERNS.items():
+        for exact in patterns.get("exact", []):
+            if domain == exact:
+                return cid
+        for label_pat in patterns.get("label", []):
+            for lbl in labels:
+                if label_pat in lbl:
+                    return cid
+    return None
+
+
+def _known_competitor_ids() -> set[str]:
+    """For the 'zero-presence' report — competitors in config.py NOT in
+    _BRAND_DOMAIN_PATTERNS are still tracked so we know what we missed."""
+    return {c["id"] for c in COMPETITORS if c.get("id")}
 
 
 def run_serp(client: ApifyClient, market: str) -> list[dict]:
@@ -216,7 +247,7 @@ def _is_own_brand_query(query: str, competitor_id: str) -> bool:
     return any(tok in q_lower for tok in tokens)
 
 
-def score(items: list[dict], known: dict[str, str]) -> tuple[dict, Counter]:
+def score(items: list[dict]) -> tuple[dict, Counter]:
     """Returns ({competitor_id: stats}, Counter of unknown domains).
 
     Stats per competitor:
@@ -242,7 +273,7 @@ def score(items: list[dict], known: dict[str, str]) -> tuple[dict, Counter]:
             d = _domain(url)
             if not d:
                 continue
-            cid = known.get(d)
+            cid = _match_competitor(d)
             if cid:
                 if _is_own_brand_query(query, cid):
                     # Trivial self-ranking; count for visibility but exclude from score
@@ -303,7 +334,7 @@ def render(stats: dict, unknown: Counter, market: str, csv_path: str) -> None:
               f"{(r['avg_rank'] or '-'):>4} | {r['own_brand_hits']:>9d} | {conf:10s} |")
 
     # Competitors in config.py that didn't appear at all
-    all_cids = {c["id"] for c in COMPETITORS}
+    all_cids = _known_competitor_ids()
     appeared = set(stats.keys())
     no_show = sorted(all_cids - appeared)
     if no_show:
@@ -339,10 +370,9 @@ def main() -> int:
         print("ERROR: APIFY_API_TOKEN not set in .env.local", file=sys.stderr)
         return 1
     client = ApifyClient(os.environ["APIFY_API_TOKEN"])
-    known = _build_competitor_domain_map()
-    print(f"Loaded {len(known)} known competitor domain(s) from config.py")
+    print(f"Pattern-matching against {len(_BRAND_DOMAIN_PATTERNS)} known competitor brand(s)")
     items = run_serp(client, market)
-    stats, unknown = score(items, known)
+    stats, unknown = score(items)
     csv_path = os.path.join(_PROJECT_ROOT, "logs", f"serp_research_{market}.csv")
     render(stats, unknown, market, csv_path)
     return 0
