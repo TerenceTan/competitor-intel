@@ -320,6 +320,108 @@ COMPETITORS = [
             },
         ],
     },
+    # ─────────────────────────────────────────────────────────────────────
+    # Added 2026-05-14 from Phase 2.1 SERP market research (SG + VN).
+    # Minimal entries — only `id`, `name`, `tier`, `website` are populated.
+    # Optional scraper fields (pricing_url, social handles, wikifx_id, etc.)
+    # left null so existing scrapers skip them gracefully. Operator follow-up
+    # to fill these in as each broker becomes relevant to the active market view.
+    # ─────────────────────────────────────────────────────────────────────
+    {
+        "id": "ig",
+        "name": "IG",  # IG Group plc; ~10 SG SERP hits, top-tier global broker
+        "tier": 1,
+        "website": "ig.com",
+        "pricing_url": None,
+        "account_urls": [],
+        "promo_url": None,
+        "youtube_query": "",
+        "facebook_slug": "",
+        "instagram_handle": "",
+        "x_handle": "",
+        "pricing_wait_selector": None,
+        "wikifx_id": None,
+        "tradingfinder_slug": None,
+        "dailyforex_slug": None,
+        "myfxbook_slug": None,
+        "entities": [],
+    },
+    {
+        "id": "oanda",
+        "name": "OANDA",  # ~9 SG SERP hits, top-tier global broker
+        "tier": 1,
+        "website": "oanda.com",
+        "pricing_url": None,
+        "account_urls": [],
+        "promo_url": None,
+        "youtube_query": "",
+        "facebook_slug": "",
+        "instagram_handle": "",
+        "x_handle": "",
+        "pricing_wait_selector": None,
+        "wikifx_id": None,
+        "tradingfinder_slug": None,
+        "dailyforex_slug": None,
+        "myfxbook_slug": None,
+        "entities": [],
+    },
+    {
+        "id": "phillip-nova",
+        "name": "Phillip Nova",  # ~9 SG SERP hits, MAS-licensed (local SG broker)
+        "tier": 2,
+        "website": "phillipnova.com.sg",
+        "pricing_url": None,
+        "account_urls": [],
+        "promo_url": None,
+        "youtube_query": "",
+        "facebook_slug": "",
+        "instagram_handle": "",
+        "x_handle": "",
+        "pricing_wait_selector": None,
+        "wikifx_id": None,
+        "tradingfinder_slug": None,
+        "dailyforex_slug": None,
+        "myfxbook_slug": None,
+        "entities": [],
+    },
+    {
+        "id": "fp-markets",
+        "name": "FP Markets",  # ~4 SG + ~3 VN SERP hits, Australian mid-tier
+        "tier": 2,
+        "website": "fpmarkets.com",
+        "pricing_url": None,
+        "account_urls": [],
+        "promo_url": None,
+        "youtube_query": "",
+        "facebook_slug": "",
+        "instagram_handle": "",
+        "x_handle": "",
+        "pricing_wait_selector": None,
+        "wikifx_id": None,
+        "tradingfinder_slug": None,
+        "dailyforex_slug": None,
+        "myfxbook_slug": None,
+        "entities": [],
+    },
+    {
+        "id": "litefinance",
+        "name": "LiteFinance",  # ~5 VN SERP hits, VN-localized landing page
+        "tier": 2,
+        "website": "litefinance.com",
+        "pricing_url": None,
+        "account_urls": [],
+        "promo_url": None,
+        "youtube_query": "",
+        "facebook_slug": "",
+        "instagram_handle": "",
+        "x_handle": "",
+        "pricing_wait_selector": None,
+        "wikifx_id": None,
+        "tradingfinder_slug": None,
+        "dailyforex_slug": None,
+        "myfxbook_slug": None,
+        "entities": [],
+    },
 ]
 
 

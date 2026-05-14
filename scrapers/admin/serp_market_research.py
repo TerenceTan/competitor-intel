@@ -139,6 +139,14 @@ _BRAND_DOMAIN_PATTERNS: dict[str, dict[str, list[str]]] = {
     "mitrade": {"label": ["mitrade"]},
     "tmgm": {"label": ["tmgm"]},
     "pepperstone": {"label": ["pepperstone"]},
+    # ─── added 2026-05-14 from Phase 2.1 SERP market research ───
+    # "ig" is 2 chars — too short for label match — use prefix (matches
+    # ig.com + ig.com.sg + ig.com.au + ig.com.hk + ig.com.my + ig.com.de etc.)
+    "ig": {"prefix": ["ig.com"]},
+    "oanda": {"label": ["oanda"]},
+    "phillip-nova": {"label": ["phillipnova"]},
+    "fp-markets": {"label": ["fpmarkets"]},
+    "litefinance": {"label": ["litefinance"]},
 }
 
 # Localization params for the Apify google-search-scraper actor
@@ -168,7 +176,8 @@ def _match_competitor(domain: str) -> str | None:
 
     Pattern resolution order:
       1. Exact patterns (full-domain equality)
-      2. Label patterns (substring within ANY dot-separated label)
+      2. Prefix patterns (domain starts with pattern then '.' or end)
+      3. Label patterns (substring within ANY dot-separated label)
 
     Falls back to None — surfaces the domain as "unknown" for review.
     """
@@ -178,6 +187,10 @@ def _match_competitor(domain: str) -> str | None:
     for cid, patterns in _BRAND_DOMAIN_PATTERNS.items():
         for exact in patterns.get("exact", []):
             if domain == exact:
+                return cid
+        for prefix in patterns.get("prefix", []):
+            # Match 'ig.com' AND 'ig.com.sg' AND 'ig.com.au' but NOT 'igsomething.com'
+            if domain == prefix or domain.startswith(prefix + "."):
                 return cid
         for label_pat in patterns.get("label", []):
             for lbl in labels:
