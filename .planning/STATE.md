@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: context exhaustion at 76% (2026-05-14)
-last_updated: "2026-05-14T11:48:45.548Z"
-last_activity: 2026-05-14 -- Phase 02.1 execution started
+status: phase_complete
+stopped_at: Phase 02.1 code complete — 4/4 plans shipped, 12/12 must-haves verified, 4 human-verification items deferred to live-server smoke
+last_updated: "2026-05-14T13:05:00Z"
+last_activity: 2026-05-14 -- Phase 02.1 complete (all 4 plans landed in single session; competitor_markets table + import script + /markets curation filter + Emerging rail + admin per-market editor + data-health markets-seeded tile)
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 19
-  completed_plans: 15
-  percent: 79
+  completed_plans: 19
+  percent: 100
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-04)
 
 ## Current Position
 
-Phase: 02.1 (per-market-competitor-curation-operator-driven-show-hide) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 02.1
-Last activity: 2026-05-14 -- Phase 02.1 execution started
+Phase: 02.1 (per-market-competitor-curation-operator-driven-show-hide) — CODE COMPLETE (4/4 plans shipped, 12/12 must-haves verified)
+Plan: 4 of 4 complete (02.1-01 competitor_markets schema, 02.1-02 operator xlsx import script, 02.1-03 /markets curation filter + Emerging rail, 02.1-04 admin per-market editor + data-health tile)
+Status: Phase 02.1 code complete. Default-safe contract (D2.1-04/D2.1-05) verified: empty competitor_markets table → /markets/<code> renders identically to Phase 2. Operator follow-ups deferred: (a) marketing fills logs/PHASE_2_1_COMPETITOR_REVIEW.xlsx, (b) operator runs .venv/bin/python scrapers/admin/import_market_decisions.py on EC2, (c) marketing maintains rows via /admin/competitors/<id>. EC2 prerequisite: .venv pip install openpyxl.
+Last activity: 2026-05-14 -- Phase 02.1 wave 2 complete (02.1-02 + 02.1-03 + 02.1-04 merged into main); all plans shipped in single session
 
 Progress: [██████████] 100%
 
