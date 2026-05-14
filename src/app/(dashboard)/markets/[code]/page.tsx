@@ -373,6 +373,21 @@ export default async function MarketDetailPage({
     return a.competitor.tier - b.competitor.tier;
   });
 
+  // === Phase 2.1: Operator-curated SHOW/HIDE filter (D2.1-04 / D2.1-05) ===
+  // Default-safe rollout: when competitor_markets is EMPTY for this market,
+  // the filter is a no-op and behavior matches Phase 2 exactly (show all
+  // competitors with social data). When the table has rows for this market,
+  // narrow to status='active' — non-active and uncurated competitors hide.
+  const curatedActiveIds = new Set(
+    curatedMarketRows
+      .filter((r) => r.status === "active")
+      .map((r) => r.competitorId),
+  );
+  const hasCuration = curatedMarketRows.length > 0;
+  const filteredSocialRows = hasCuration
+    ? socialRows.filter((r) => curatedActiveIds.has(r.competitor.id))
+    : socialRows;
+
   // Merge pricing: market-specific takes priority, fallback to global
   const pricingData = allCompetitors.map((c) => {
     const marketSnap = marketPricingMap.get(c.id);
@@ -698,18 +713,23 @@ export default async function MarketDetailPage({
       </section>
 
       {/* === Phase 2: Digital Presence === */}
+      {/* Phase 2.1 (D2.1-04 / D2.1-05): filteredSocialRows narrows the Phase 2
+          resolver output (socialRows) by the operator-curated active list.
+          When competitor_markets is empty for this market, filteredSocialRows
+          === socialRows (default-safe). Both consts remain visible to make
+          the filter explicitly additive. */}
       <section>
         <h2 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
           <Users className="w-4 h-4 text-gray-400" />
           Digital Presence
-          {socialRows.length > 0 && (
+          {filteredSocialRows.length > 0 && (
             <span className="text-xs font-normal text-gray-400">
-              {socialRows.length} {socialRows.length === 1 ? "broker" : "brokers"}
+              {filteredSocialRows.length} {filteredSocialRows.length === 1 ? "broker" : "brokers"}
             </span>
           )}
         </h2>
 
-        {socialRows.length === 0 ? (
+        {filteredSocialRows.length === 0 ? (
           <EmptyState
             title="No social data yet for this market"
             description="Check back after the next Apify run, or use the global view from the broker profile."
@@ -727,13 +747,13 @@ export default async function MarketDetailPage({
                 </tr>
               </thead>
               <tbody>
-                {socialRows.map(({ competitor, cells, anyMarketSpecific }, idx) => {
+                {filteredSocialRows.map(({ competitor, cells, anyMarketSpecific }, idx) => {
                   const isSelf = !!competitor.isSelf;
                   return (
                     <tr
                       key={competitor.id}
                       className={`border-b border-gray-100 transition-colors ${
-                        idx === socialRows.length - 1 ? "border-b-0" : ""
+                        idx === filteredSocialRows.length - 1 ? "border-b-0" : ""
                       } ${isSelf ? "bg-primary/[0.03]" : "hover:bg-gray-50/60"}`}
                     >
                       <td className="px-4 py-2.5">
