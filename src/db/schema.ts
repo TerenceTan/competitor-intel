@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core";
 
 export const competitors = sqliteTable("competitors", {
   id: text("id").primaryKey(),
@@ -188,3 +188,28 @@ export const scraperRuns = sqliteTable("scraper_runs", {
   rawDeltasCount: integer("raw_deltas_count").notNull().default(0),
   registeredEventsCount: integer("registered_events_count").notNull().default(0),
 });
+
+// Phase 2.1 — operator-curated per-market SHOW/HIDE list (D2.1-01, D2.1-02).
+// Mirrors scrapers/db_utils.py CREATE TABLE competitor_markets. The absent
+// row for a given (competitor, market) tuple means "not curated" — Plan
+// 02.1-03 falls back to Phase 2 behavior (show all) when the table is empty
+// for a market (D2.1-04). status is a string-typed enum constrained at the
+// SQLite layer by a CHECK constraint — there's no native enum type, so
+// Drizzle types it as a plain string here; consumers (Plan 02.1-03 /
+// 02.1-04) narrow it with `as 'active' | 'planned' | 'withdrawn' | 'emerging'`.
+export const competitorMarkets = sqliteTable(
+  "competitor_markets",
+  {
+    competitorId: text("competitor_id")
+      .notNull()
+      .references(() => competitors.id),
+    marketCode: text("market_code").notNull(),
+    // 'active' | 'planned' | 'withdrawn' | 'emerging' — enforced by SQLite CHECK
+    status: text("status").notNull(),
+    notes: text("notes"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.competitorId, t.marketCode] }),
+  }),
+);
