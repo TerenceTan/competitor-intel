@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { db } from "@/db";
 import {
   markets,
@@ -24,6 +26,7 @@ import {
   Activity,
   Shield,
   Users,
+  Sparkles,
 } from "lucide-react";
 import { MARKET_FLAGS } from "@/lib/constants";
 import { safeParseJson } from "@/lib/utils";
@@ -132,6 +135,57 @@ function formatFollowers(n: number | null): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Phase 2.1: Emerging Competitors rail — SERP CSV reader             */
+/* ------------------------------------------------------------------ */
+
+type SerpRow = {
+  competitorId: string;
+  queriesAppeared: number;
+  bestRank: number;
+};
+
+/**
+ * Read logs/serp_research_<market>.csv (produced by
+ * scrapers/admin/serp_market_research.py) and return rows that pass the
+ * STRONG threshold per D2.1-07: queries_appeared >= 2 AND best_rank <= 10.
+ *
+ * Returns [] if the file does not exist (operator hasn't run SERP research
+ * for this market yet) or the CSV is malformed. Never throws — the Emerging
+ * rail is a nice-to-have, not load-bearing for the page.
+ */
+async function readEmergingSerpRows(marketCode: string): Promise<SerpRow[]> {
+  const csvPath = join(process.cwd(), "logs", `serp_research_${marketCode}.csv`);
+  let raw: string;
+  try {
+    raw = await readFile(csvPath, "utf-8");
+  } catch {
+    return []; // file not present — graceful no-op
+  }
+  const lines = raw.trim().split(/\r?\n/);
+  if (lines.length < 2) return []; // header only or empty
+  const header = lines[0].split(",").map((s) => s.trim());
+  const colCid = header.indexOf("competitor_id");
+  const colQA = header.indexOf("queries_appeared");
+  const colBR = header.indexOf("best_rank");
+  if (colCid < 0 || colQA < 0 || colBR < 0) return []; // unexpected schema
+  const rows: SerpRow[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(",");
+    const cid = (cells[colCid] ?? "").trim();
+    const qaRaw = (cells[colQA] ?? "").trim();
+    const brRaw = (cells[colBR] ?? "").trim();
+    if (!cid) continue;
+    const qa = Number(qaRaw);
+    const br = Number(brRaw);
+    if (!Number.isFinite(qa) || !Number.isFinite(br)) continue;
+    if (qa >= 2 && br <= 10) {
+      rows.push({ competitorId: cid, queriesAppeared: qa, bestRank: br });
+    }
+  }
+  return rows;
 }
 
 /* ------------------------------------------------------------------ */
@@ -500,6 +554,37 @@ export default async function MarketDetailPage({
   const promoCount = marketPromos.length;
   const changeCount = recentMarketChanges.length;
 
+  // === Phase 2.1: Emerging Competitors rail data (D2.1-07) ===
+  // Reads SERP research CSV (operator-side artifact from
+  // scrapers/admin/serp_market_research.py). Filters to STRONG signal not yet
+  // curated in any status (per CONTEXT.md Claude's Discretion: dedupe against
+  // ALL rows so once marketing has expressed an opinion — active/planned/
+  // withdrawn/emerging — the competitor leaves the 'unknown' bucket). Joins
+  // to allCompetitors for name + website; SERP-discovered domains not yet in
+  // scrapers/config.py are skipped (defer to operator to add the broker).
+  // Missing CSV is a graceful no-op (readEmergingSerpRows catches ENOENT).
+  const serpRows = await readEmergingSerpRows(marketCode);
+  const curatedAnyIds = new Set(curatedMarketRows.map((r) => r.competitorId));
+  const competitorById = new Map(allCompetitors.map((c) => [c.id, c]));
+  type EmergingItem = {
+    competitor: (typeof allCompetitors)[number];
+    queriesAppeared: number;
+    bestRank: number;
+  };
+  const emergingRail: EmergingItem[] = serpRows
+    .filter((r) => !curatedAnyIds.has(r.competitorId))
+    .map((r): EmergingItem | null => {
+      const comp = competitorById.get(r.competitorId);
+      if (!comp) return null; // SERP found a competitor not yet in config — skip
+      return {
+        competitor: comp,
+        queriesAppeared: r.queriesAppeared,
+        bestRank: r.bestRank,
+      };
+    })
+    .filter((r): r is EmergingItem => r !== null)
+    .sort((a, b) => a.bestRank - b.bestRank); // best (lowest) rank first
+
   return (
     <div className="space-y-6 max-w-6xl">
       {/* Breadcrumb + Back */}
@@ -807,6 +892,53 @@ export default async function MarketDetailPage({
           </div>
         )}
       </section>
+
+      {/* === Phase 2.1: Emerging Competitors rail (D2.1-07) === */}
+      {emergingRail.length > 0 && (
+        <section>
+          <h2 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-gray-400" />
+            Emerging Competitors
+            <span className="text-xs font-normal text-gray-400">
+              STRONG SERP signal · not yet curated
+            </span>
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {emergingRail.map(({ competitor, queriesAppeared, bestRank }) => (
+              <Card key={competitor.id} className="p-3 border-gray-200 bg-white">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <a
+                      href={
+                        competitor.website.startsWith("http")
+                          ? competitor.website
+                          : `https://${competitor.website}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-gray-900 hover:text-primary truncate block"
+                    >
+                      {competitor.name}
+                    </a>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Best rank #{bestRank} · {queriesAppeared} quer
+                      {queriesAppeared === 1 ? "y" : "ies"}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
+                    Watching
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-gray-400">
+            Brokers with at least 2 SERP appearances at rank ≤10 in this market that
+            haven&apos;t been curated yet. Use the admin panel to mark them active /
+            planned / withdrawn.
+          </p>
+        </section>
+      )}
 
       {/* Two-column: Account Types + Recent Changes */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
