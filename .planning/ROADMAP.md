@@ -93,7 +93,7 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 02.1-01-PLAN.md — competitor_markets table (Drizzle + Python migration; CHECK constraint on 4-value status enum + composite PK)
+- [x] 02.1-01-PLAN.md — competitor_markets table (Drizzle + Python migration; CHECK constraint on 4-value status enum + composite PK)
 
 **Wave 2** *(blocked on Wave 1; parallel-safe — no file overlap)*
 - [ ] 02.1-02-PLAN.md — Operator import script (scrapers/admin/import_market_decisions.py reads PHASE_2_1_COMPETITOR_REVIEW.xlsx → INSERT OR REPLACE with --purge / --dry-run; audit row per D2.1-10)
