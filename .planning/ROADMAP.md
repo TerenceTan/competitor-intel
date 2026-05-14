@@ -79,6 +79,23 @@ Plans:
 
 **UI hint**: yes
 
+### Phase 2.1: Per-Market Competitor Curation (operator-driven SHOW/HIDE)
+**Goal**: Marketing managers see only the brokers that are actually competing in their market — Phase 2 fan out put all 15 competitors on every market view, which is noisy. Phase 2.1 introduces operator-curated per-market presence (data-driven SHOW list from SERP + 5-signal validator, operator approves) and surfaces non-active brokers with strong SERP signal as "Emerging" so expansion patterns aren't missed.
+**Depends on**: Phase 2 (per-market scraper + market view shipped)
+**Requirements**: MARKET-02 (refinement), MARKET-03 (presence-aware fallback)
+**Success Criteria** (what must be TRUE):
+  1. A `competitor_markets(competitor_id, market_code, status)` join table exists with `status ∈ {active, planned, withdrawn}`; absent rows = "not curated"
+  2. `/markets/<code>` default view filters to `competitor_markets.status='active'` for that market — non-active and uncurated competitors hidden
+  3. "Emerging competitors" rail appears at bottom of `/markets/<code>` listing competitors with STRONG SERP signal (from `serp_research_<market>.csv`) but no `active` row in `competitor_markets` — operator watchlist
+  4. `/admin/competitors/<id>` lets operator edit per-market status (active / planned / withdrawn) without redeploys
+  5. Initial seed of `competitor_markets` from operator-approved validator output for SG + VN (markets researched in Phase 2.1 prep)
+**Plans**: TBD (drafted after marketing-team validator review)
+**Prep done (pre-plan)**:
+- `scrapers/admin/serp_market_research.py` — SERP scrape per market with own-brand filter + ccTLD pattern matching
+- `scrapers/admin/validate_market_presence.py` — 5-signal validator (URL/lang/payment/app-store/WikiFX) + SERP combiner
+- 5 SERP-discovered competitors added to `config.py`: IG, Oanda, Phillip Nova, FP Markets, LiteFinance
+**UI hint**: yes (Emerging rail + admin per-market status editor)
+
 ### Phase 3: BigQuery SoS Sync + Better Promo Extraction
 **Goal**: Marketing managers can see, on each per-market view, whether competitor promo activity correlates with Share of Search demand changes — driven by clean, multilingual, confidence-scored promo data and a nightly BigQuery sync that costs cents, not thousands. (This phase runs as an independent track from Phases 1–2 and can be developed in parallel by a second contributor; merge sequencing only matters at the schema/run_all.py touch points already landed in Phase 1.)
 **Depends on**: Phase 1 (schema deltas + calibration set already in place)
@@ -125,6 +142,7 @@ Phase 3 may overlap with Phase 2 in execution if a second contributor is availab
 |-------|----------------|--------|-----------|
 | 1. Foundation — Apify + Scaffolding + Trust Schema | 6/6 | Complete (operator follow-ups outstanding before Phase 2 EC2 deploy) | 2026-05-04 |
 | 2. Per-Market Social Fanout (8 APAC Markets) | 5/5 | Code complete; operator follow-up for 2-market Apify smoke (APIFY_MARKET_FANOUT_SMOKE_PENDING.txt) | 2026-05-14 |
+| 2.1. Per-Market Competitor Curation (SHOW/HIDE + Emerging rail) | 0/TBD | Prep done (SERP + validator scripts shipped); plans pending marketing-team SHOW-list review | - |
 | 3. BigQuery SoS Sync + Better Promo Extraction | 0/TBD | Not started | - |
 | 4. Per-Market AI Promo Recommendations | 0/TBD | Not started | - |
 | 5. Confidence & Freshness UX Polish | 0/TBD | Not started | - |
