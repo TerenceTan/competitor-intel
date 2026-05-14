@@ -1,9 +1,10 @@
 "use server";
 
 import { db } from "@/db";
-import { competitors } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { competitors, competitorMarkets, changeEvents } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { PRIORITY_MARKETS, type MarketCode } from "@/lib/markets";
 
 export interface CompetitorFormData {
   id: string;
@@ -331,5 +332,159 @@ export async function deleteCompetitor(id: string) {
   await db.delete(competitors).where(eq(competitors.id, id));
 
   revalidatePath("/admin");
+  return { success: true };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Phase 2.1: Per-market curation server actions (D2.1-08)            */
+/*                                                                     */
+/*  Both actions enforce:                                              */
+/*    - competitorId exists in competitors table (FK parity)           */
+/*    - marketCode is in PRIORITY_MARKETS (no rogue codes)             */
+/*    - status in the 4-value enum (CHECK constraint parity)           */
+/*                                                                     */
+/*  Both actions write an audit row to change_events with              */
+/*  field_name='market_curation_edit' for manual-edit traceability     */
+/*  (complements Plan 02.1-02's bulk-import audit row of               */
+/*  field_name='market_curation_imported').                            */
+/* ------------------------------------------------------------------ */
+
+const VALID_STATUSES = ["active", "planned", "withdrawn", "emerging"] as const;
+type CuratedStatus = (typeof VALID_STATUSES)[number];
+
+function isCuratedMarketCode(value: string): value is MarketCode {
+  return (PRIORITY_MARKETS as readonly string[]).includes(value);
+}
+
+function isCuratedStatus(value: string): value is CuratedStatus {
+  return (VALID_STATUSES as readonly string[]).includes(value);
+}
+
+export async function upsertCompetitorMarket(
+  competitorId: string,
+  marketCode: string,
+  status: string,
+  notes: string | null,
+): Promise<{ success: true } | { error: string }> {
+  // Validation — server is the trust boundary; client validation is best-effort UX.
+  if (!competitorId) return { error: "Competitor ID is required" };
+  if (!isCuratedMarketCode(marketCode)) return { error: `Invalid market code: ${marketCode}` };
+  if (!isCuratedStatus(status)) return { error: `Invalid status: ${status}` };
+
+  // FK check (defensive — SQLite would reject anyway via the FK, but a
+  // pre-flight check gives a friendlier error message).
+  const [comp] = await db
+    .select({ id: competitors.id })
+    .from(competitors)
+    .where(eq(competitors.id, competitorId))
+    .limit(1);
+  if (!comp) return { error: `Unknown competitor: ${competitorId}` };
+
+  // Read prior status (for the audit row).
+  const [prior] = await db
+    .select({ status: competitorMarkets.status })
+    .from(competitorMarkets)
+    .where(
+      and(
+        eq(competitorMarkets.competitorId, competitorId),
+        eq(competitorMarkets.marketCode, marketCode),
+      ),
+    )
+    .limit(1);
+  const oldStatus = prior?.status ?? null;
+
+  const nowIso = new Date().toISOString();
+  const cleanNotes = notes && notes.trim() ? notes.trim() : null;
+
+  // UPSERT via Drizzle's onConflictDoUpdate — emits SQLite ON CONFLICT
+  // (composite PK) DO UPDATE syntax (same effect as INSERT OR REPLACE,
+  // but preserves any future tracked-by-trigger columns).
+  await db
+    .insert(competitorMarkets)
+    .values({
+      competitorId,
+      marketCode,
+      status,
+      notes: cleanNotes,
+      updatedAt: nowIso,
+    })
+    .onConflictDoUpdate({
+      target: [competitorMarkets.competitorId, competitorMarkets.marketCode],
+      set: {
+        status,
+        notes: cleanNotes,
+        updatedAt: nowIso,
+      },
+    });
+
+  // Audit row — distinguishes manual edits from bulk imports (Plan 02.1-02
+  // uses field_name='market_curation_imported').
+  await db.insert(changeEvents).values({
+    competitorId,
+    domain: "admin",
+    fieldName: "market_curation_edit",
+    oldValue: oldStatus,
+    newValue: status,
+    severity: "low",
+    detectedAt: nowIso,
+    marketCode,
+  });
+
+  revalidatePath(`/admin/competitors/${competitorId}`);
+  revalidatePath(`/markets/${marketCode}`);
+  revalidatePath("/admin/data-health"); // refresh the seeded-markets tile
+
+  return { success: true };
+}
+
+export async function clearCompetitorMarket(
+  competitorId: string,
+  marketCode: string,
+): Promise<{ success: true } | { error: string }> {
+  if (!competitorId) return { error: "Competitor ID is required" };
+  if (!isCuratedMarketCode(marketCode)) return { error: `Invalid market code: ${marketCode}` };
+
+  // Read prior status (for the audit row + no-op detection).
+  const [prior] = await db
+    .select({ status: competitorMarkets.status })
+    .from(competitorMarkets)
+    .where(
+      and(
+        eq(competitorMarkets.competitorId, competitorId),
+        eq(competitorMarkets.marketCode, marketCode),
+      ),
+    )
+    .limit(1);
+  if (!prior) {
+    // Nothing to clear — idempotent no-op. Return success without an audit row.
+    return { success: true };
+  }
+
+  const nowIso = new Date().toISOString();
+
+  await db
+    .delete(competitorMarkets)
+    .where(
+      and(
+        eq(competitorMarkets.competitorId, competitorId),
+        eq(competitorMarkets.marketCode, marketCode),
+      ),
+    );
+
+  await db.insert(changeEvents).values({
+    competitorId,
+    domain: "admin",
+    fieldName: "market_curation_edit",
+    oldValue: prior.status,
+    newValue: null, // cleared
+    severity: "low",
+    detectedAt: nowIso,
+    marketCode,
+  });
+
+  revalidatePath(`/admin/competitors/${competitorId}`);
+  revalidatePath(`/markets/${marketCode}`);
+  revalidatePath("/admin/data-health");
+
   return { success: true };
 }
