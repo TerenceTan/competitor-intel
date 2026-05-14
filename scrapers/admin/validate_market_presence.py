@@ -140,21 +140,53 @@ MARKET_META: dict[str, dict] = {
 # Per-signal validators
 # ─────────────────────────────────────────────────────────────────────────
 def _fetch(url: str) -> tuple[str, str]:
-    """Returns (final_url, body_lowercase). Empty on error."""
-    try:
-        r = requests.get(
-            url,
-            timeout=10,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-            },
-            allow_redirects=True,
-        )
-        return r.url, r.text.lower()
-    except Exception as e:
-        print(f"  [WARN] fetch failed: {url}: {type(e).__name__}", file=sys.stderr)
-        return "", ""
+    """Returns (final_url, body_lowercase). Empty on error.
+
+    Two-attempt retry: some Cloudflare-fronted sites (xm.com observed) return
+    broken gzip on the default Accept-Encoding header; second attempt forces
+    identity encoding to bypass the decoder.
+    """
+    headers_common = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    for attempt, accept_encoding in enumerate(("gzip, deflate", "identity"), 1):
+        try:
+            r = requests.get(
+                url,
+                timeout=10,
+                headers={**headers_common, "Accept-Encoding": accept_encoding},
+                allow_redirects=True,
+            )
+            return r.url, r.text.lower()
+        except Exception as e:
+            if attempt == 2:
+                print(f"  [WARN] fetch failed (both attempts): {url}: {type(e).__name__}",
+                      file=sys.stderr)
+                return "", ""
+            continue
+    return "", ""
+
+
+def _localized_url_candidates(website: str, market: str) -> list[str]:
+    """Ordered URL candidates: localized ccTLD first, main website as fallback.
+
+    For LiteFinance + VN: try https://www.litefinance.vn (where their actual
+    VN content lives) before https://www.litefinance.com. For brokers without
+    a regional variant, both URLs may fail with one being 404 — that's fine,
+    we just take the first one that returns a body.
+    """
+    if not website:
+        return []
+    parts = website.lower().split(".")
+    brand = parts[1] if parts and parts[0] == "www" else parts[0] if parts else website
+    meta = MARKET_META.get(market, {})
+    candidates: list[str] = []
+    for tld in meta.get("cctlds", []):
+        candidates.append(f"https://www.{brand}{tld}")
+    candidates.append(website if website.startswith("http") else f"https://www.{website}")
+    return candidates
 
 
 def s1_local_url(final_url: str, body: str, market: str) -> bool:
@@ -286,16 +318,28 @@ def main() -> int:
         website = c.get("website") or ""
         if not website:
             continue
-        url = website if website.startswith("http") else f"https://www.{website}"
-        print(f"  fetching {cid:14s} {url}")
-        final_url, body = _fetch(url)
+        # Try the localized ccTLD variant first (e.g., litefinance.vn for VN),
+        # fall back to the main website. First URL with a non-empty body wins.
+        final_url, body = "", ""
+        for candidate in _localized_url_candidates(website, market):
+            print(f"  fetching {cid:14s} {candidate}")
+            final_url, body = _fetch(candidate)
+            if body:
+                break
 
         s1 = s1_local_url(final_url, body, market) if body else False
         s2 = s2_local_lang(body, market) if body else False
         s3 = s3_local_payment(body, market) if body else False
         s4 = s4_app_store(cid, market)
         s5 = s5_wikifx_local(cid, market)
-        signal_count = sum([s1, s2, s3, s4, s5])
+
+        # In EN-dominant markets (SG/HK/MY/PH) S2 is a free pass for every
+        # broker — drop it from the count so the >=3 STRONG threshold reflects
+        # meaningful signal density. Non-EN markets keep all 5.
+        if meta["lang_skip"]:
+            signal_count = sum([s1, s3, s4, s5])
+        else:
+            signal_count = sum([s1, s2, s3, s4, s5])
 
         serp = serp_data.get(cid, {})
         serp_conf = _serp_confidence(serp)
