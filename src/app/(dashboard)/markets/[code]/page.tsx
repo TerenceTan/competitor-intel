@@ -7,6 +7,7 @@ import {
   accountTypeSnapshots,
   changeEvents,
   socialSnapshots,
+  competitorMarkets,
 } from "@/db/schema";
 import { eq, sql, desc, and, gte, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
@@ -172,6 +173,7 @@ export default async function MarketDetailPage({
     marketSocialRows,
     globalSocialRows,
     socialZeroResultRows,
+    curatedMarketRows,
   ] = await Promise.all([
     db
       .select()
@@ -265,6 +267,18 @@ export default async function MarketDetailPage({
       )
       .orderBy(desc(changeEvents.detectedAt))
       .limit(500),
+    // Phase 2.1 — operator-curated SHOW/HIDE list for the current market.
+    // Plan 02.1-01 created the table; Plan 02.1-02 (import) and Plan 02.1-04
+    // (admin UI) write rows. Default-safe per D2.1-04 / D2.1-05: an empty
+    // result here means "marketing has not curated this market yet" — the
+    // filter logic below falls back to Phase 2 behavior (show all).
+    db
+      .select({
+        competitorId: competitorMarkets.competitorId,
+        status: competitorMarkets.status,
+      })
+      .from(competitorMarkets)
+      .where(eq(competitorMarkets.marketCode, marketCode)),
   ]);
 
   // Build lookup maps
