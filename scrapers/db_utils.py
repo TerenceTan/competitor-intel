@@ -198,6 +198,30 @@ def get_db() -> sqlite3.Connection:
     """)
     conn.commit()
 
+    # New table: competitor_markets (Phase 2.1 / D2.1-01, D2.1-02, D2.1-03)
+    # Operator-curated per-market SHOW/HIDE list. Absent row for (competitor,
+    # market) = "not curated" — Plan 02.1-03 defaults to "show all" when the
+    # table is empty for that market so behavior matches Phase 2 until
+    # marketing review lands (D2.1-04 / D2.1-05). The CHECK constraint is
+    # how SQLite enforces the status enum (no native enum type). Mirrors
+    # src/db/schema.ts competitorMarkets — keep in sync if either side
+    # changes.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS competitor_markets (
+            competitor_id TEXT NOT NULL REFERENCES competitors(id),
+            market_code TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('active','planned','withdrawn','emerging')),
+            notes TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (competitor_id, market_code)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_competitor_markets_market_status
+        ON competitor_markets (market_code, status)
+    """)
+    conn.commit()
+
     # Ensure Pepperstone exists as the self-benchmark row
     conn.execute(
         """
