@@ -96,11 +96,11 @@ Plans:
 - [x] 02.1-01-PLAN.md — competitor_markets table (Drizzle + Python migration; CHECK constraint on 4-value status enum + composite PK)
 
 **Wave 2** *(blocked on Wave 1; parallel-safe — no file overlap)*
-- [ ] 02.1-02-PLAN.md — Operator import script (scrapers/admin/import_market_decisions.py reads PHASE_2_1_COMPETITOR_REVIEW.xlsx → INSERT OR REPLACE with --purge / --dry-run; audit row per D2.1-10)
-- [ ] 02.1-03-PLAN.md — /markets/[code] default-safe curation filter (D2.1-04 / D2.1-05) + Emerging Competitors rail reading logs/serp_research_<market>.csv
+- [x] 02.1-02-PLAN.md — Operator import script (scrapers/admin/import_market_decisions.py reads PHASE_2_1_COMPETITOR_REVIEW.xlsx → INSERT OR REPLACE with --purge / --dry-run; audit row per D2.1-10)
+- [x] 02.1-03-PLAN.md — /markets/[code] default-safe curation filter (D2.1-04 / D2.1-05) + Emerging Competitors rail reading logs/serp_research_<market>.csv
 
 **Wave 3** *(blocked on Wave 1; parallel-safe with Wave 2 — no file overlap)*
-- [ ] 02.1-04-PLAN.md — Admin per-market status editor at /admin/competitors/[id] + upsert/clear server actions + /admin/data-health "N of 8 markets seeded" tile (D2.1-12)
+- [x] 02.1-04-PLAN.md — Admin per-market status editor at /admin/competitors/[id] + upsert/clear server actions + /admin/data-health "N of 8 markets seeded" tile (D2.1-12)
 
 **Prep done (pre-plan)**:
 - `scrapers/admin/serp_market_research.py` — SERP scrape per market with own-brand filter + ccTLD pattern matching
