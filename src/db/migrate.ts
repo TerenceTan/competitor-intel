@@ -190,6 +190,24 @@ export function runMigrations() {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_app_store_competitor_market
     ON app_store_snapshots (competitor_id, market_code)`);
 
+  // Phase 2.1 — competitor_markets (D2.1-01 / D2.1-02): operator-curated
+  // per-market SHOW/HIDE list. MIRRORS scrapers/db_utils.py get_db() — keep
+  // in sync. Empty/missing table is the default-safe state (D2.1-04 /
+  // D2.1-05): /markets/<code> falls back to Phase 2 "show all" behavior.
+  // Bugfix 2.2a-1 (2026-05-14): the Python-side migration only ran when a
+  // Python scraper executed, so a freshly-deployed EC2 instance 500'd on
+  // /markets/<code> until then. Drizzle migration here closes that gap.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS competitor_markets (
+    competitor_id TEXT NOT NULL REFERENCES competitors(id),
+    market_code TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','planned','withdrawn','emerging')),
+    notes TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (competitor_id, market_code)
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_competitor_markets_market_status
+    ON competitor_markets (market_code, status)`);
+
   // scraper_config + market_config columns — DB-driven competitor configuration
   for (const col of ["scraper_config", "market_config"]) {
     try {
