@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { scraperRuns, apifyRunLogs } from "@/db/schema";
+import { scraperRuns, apifyRunLogs, competitorMarkets } from "@/db/schema";
 import { desc, sql, gte, and, eq } from "drizzle-orm";
 import {
   Table,
@@ -48,7 +48,7 @@ export default async function DataHealthPage() {
   // fourth zero-counts query GROUP BY (actor_id, market_code) so operators
   // can see WHICH markets are failing for each scraper — critical for
   // triage once the Phase 2 fanout flag is flipped.
-  const [latestRuns, costRow, zeroCounts, zeroByMarket] = await Promise.all([
+  const [latestRuns, costRow, zeroCounts, zeroByMarket, seededRows] = await Promise.all([
     db
       .select({
         scraperName: scraperRuns.scraperName,
@@ -103,6 +103,18 @@ export default async function DataHealthPage() {
         ),
       )
       .groupBy(apifyRunLogs.actorId, apifyRunLogs.marketCode),
+
+    // Phase 2.1 / D2.1-12 — Markets with at least one curated row.
+    // Counts DISTINCT market_code (via GROUP BY) so the operator can see
+    // at-a-glance how many of the 8 APAC v1 markets have been seeded by
+    // marketing review. Empty table → 0 of 8 (visually unchanged from a
+    // zero-cost panel).
+    db
+      .select({
+        marketCode: competitorMarkets.marketCode,
+      })
+      .from(competitorMarkets)
+      .groupBy(competitorMarkets.marketCode),
   ]);
 
   // Collapse latestRuns into a Map keyed by scraperName (most-recent wins per name).
@@ -119,6 +131,11 @@ export default async function DataHealthPage() {
       });
     }
   }
+
+  // Phase 2.1 / D2.1-12 — seeded-markets tile data. Each row in seededRows
+  // is a distinct marketCode (the GROUP BY collapses duplicates), so the
+  // length is the count of markets with at least one curated competitor.
+  const seededMarkets = seededRows.length;
 
   // SQLite returns SUM as a string under some adapter paths — Number() coerces
   // safely; COALESCE above guarantees non-null.
@@ -147,6 +164,36 @@ export default async function DataHealthPage() {
             of {usd.format(APIFY_MONTHLY_CAP_USD)}/mo cap ({costPct}%)
           </span>
         </p>
+      </section>
+
+      {/* Phase 2.1 / D2.1-12 — Per-market curation status tile.
+          Counts distinct market_code values in competitor_markets so the
+          operator can see at-a-glance how much of the curation review has
+          landed in the DB. Additive to (does not replace) the existing
+          Phase 2 per-market zero-result breakdown rendered in the Scrapers
+          table below. */}
+      <section className="rounded-xl border border-gray-200 bg-white p-6">
+        <h2 className="text-sm font-medium text-gray-700 mb-2">Per-market curation</h2>
+        <p className="text-3xl font-semibold text-gray-900">
+          {seededMarkets}
+          <span className="text-base font-normal text-gray-500 ml-2">
+            of 8 markets seeded
+          </span>
+        </p>
+        {seededMarkets < 8 && (
+          <p className="text-xs text-gray-500 mt-2">
+            Markets without a curated competitor list fall back to Phase 2{" "}
+            &ldquo;show all&rdquo; behavior. Run{" "}
+            <code className="text-[11px] bg-gray-100 px-1 py-0.5 rounded">
+              scrapers/admin/import_market_decisions.py
+            </code>{" "}
+            after the next marketing review, or edit per competitor at{" "}
+            <code className="text-[11px] bg-gray-100 px-1 py-0.5 rounded">
+              /admin/competitors/&lt;id&gt;
+            </code>
+            .
+          </p>
+        )}
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white">
