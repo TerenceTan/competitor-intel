@@ -1,0 +1,20 @@
+{
+  "name": "competitor-intel-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for competitor intelligence — promotions, pricing, and changes",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^12.8.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}
